@@ -15,9 +15,17 @@ shazam = "https://app.soundcharts.com/app/market/charts?chart=shazam-top-200-wor
 
 general_css_selector = {
     "songs": "div.sc-cMhqgX.hQLcyr",
-    "artists": "div.sc-hMFtBS.gzoeoI",
-    "links": "img.sc-epnACN.ksrdaN"
+    "artists": "div.sc-esOvli.cfpVgy",
+    "links": "img.sc-epnACN.ksrdaN",
+    "change": "div.sc-hENMEE.deWhnr",
+
 }
+
+# shazam_css_selector = {
+#     "songs":"a.sc-hZSUBg.iUrqrB",
+#     "artists":,
+#     "links":
+# }
 
 css_selector_dict = {
     spotify: general_css_selector,
@@ -54,10 +62,16 @@ def parse_link(link):
     return result
 
 
+def parse_change(change):
+    change = [s.text for s in change]
+    change = [s.split('\n')[1] for s in change if '\n' in s]
+    return change
+
+
 def parse_webpage(driver, url) -> pd.DataFrame():
     chart_name = get_variable_name(url)
 
-    songs, artists, links = None, None, None
+    songs, artists, links, change = None, None, None, None
 
     while not songs or not artists or not links:
         print("Parsing webpage: {}".format(chart_name))
@@ -68,28 +82,28 @@ def parse_webpage(driver, url) -> pd.DataFrame():
         # element = driver.find_element(By.CSS_SELECTOR, 'div.sc-gKLXLV.dghebG.custom-scrollbar')
         # # Scroll to the end of the element
         # driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", element)
-        time.sleep(5)
         songs = driver.find_elements(By.CSS_SELECTOR, css_selector_dict[url]["songs"])
         # artists = driver.find_elements(By.CSS_SELECTOR, css_selector_dict[url]["artists"])
         links = driver.find_elements(By.CSS_SELECTOR, css_selector_dict[url]["links"])
-        artists = driver.find_elements(By.CSS_SELECTOR, 'div.sc-esOvli.cfpVgy')
-
-        print("Songs: ", len(songs))
-        print("Artists: ", len(artists))
-        print("Links: ", len(links))
+        artists = driver.find_elements(By.CSS_SELECTOR, css_selector_dict[url]["artists"])
+        change = driver.find_elements(By.CSS_SELECTOR, css_selector_dict[url]["change"])
 
     songs = [div.text for div in songs]
-    artists = [div.text for div in artists]
+    artists = extract_names([div.text for div in artists])
     links = [parse_link(link) for link in links]
 
-    artists = extract_names(artists)
+    change = parse_change(change)
+    print("change", change)
 
-    def make_dataframe(songs, artists, links):
-        df = pd.DataFrame(list(zip(songs, artists, links)), columns=["Song", "Artist", "Link"])
-        print(df)
+    def make_dataframe(*args):
+        df = pd.DataFrame()
+        for arg in args:
+            df = pd.concat([df, pd.DataFrame(arg)], axis=1)
+
+        df = df.set_axis([args], axis="columns")
         return df
 
-    df = (make_dataframe(songs, artists, links))
+    df = (make_dataframe(change, songs, artists, links))
     df.to_csv(f"{chart_name}.csv")
     print("csv/df created")
     return df
@@ -121,11 +135,12 @@ def run(headless):
     try:
         print("Starting")
         options = Options()
+        options.add_experimental_option("detach", True)
 
         if headless:
-            options.add_argument('--headless')
-            options.add_argument('--disable-gpu')
-        # options.add_experimental_option("detach", True)
+            # options.add_argument('--headless')
+            # options.add_argument('--disable-gpu')
+            pass
 
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
@@ -145,8 +160,9 @@ def run(headless):
 
         print("Logged in")
 
-        # Wait for the page to load
-        time.sleep(5)  # Adjust the time as needed
+        # # Wait for the page to load
+        time.sleep(7)  # Adjust the time as needed
+
         parse_webpage(driver, spotify)
         # parse_webpage(driver, spotify_noLabels)
         # parse_webpage(driver, apple_music)
