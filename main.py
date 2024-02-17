@@ -1,3 +1,4 @@
+import math
 import time
 
 import pandas as pd
@@ -43,10 +44,10 @@ def scroll(driver, scroll_amount):
     if scroll_amount == 0:
         return
     try:
+        time.sleep(1)
         element = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-gKLXLV.fAiEjs.custom-scrollbar"))
         if element:
             driver.execute_script("arguments[0].scrollTop += arguments[0].scrollHeight*0.2*arguments[1]", element, scroll_amount)
-            print(f"Scrolled down {scroll_amount * 20}%")
             time.sleep(1)
     except Exception as e:
         print("Could not scroll")
@@ -103,7 +104,8 @@ class Link:
             "shazam": "shazam-top-200-world"
         }
         self.filters_dict = {
-            "no_labels": "eyJmbHQiOiJTZWxmIHJlbGVhc2VkfFVua25vd24ifQ%3D%3D"
+            # "no_labels": "eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D",
+            "no_labels": ""
         }
         self.chart = charts[platform] if country == "GLOBAL" else "top-200-" + country
         self.chart_type = chart_type
@@ -123,10 +125,6 @@ def remove_substring_from_string(substring, string):
     return string.replace(substring, "")
 
 
-def label_filter(label_list):
-    filtered_labels = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music']
-
-
 def parse_labels(labels):
     labels = [div.text for div in labels]
     labels = [remove_substring_from_string("Unknown", label) for label in labels]
@@ -135,7 +133,7 @@ def parse_labels(labels):
     return labels
 
 
-def parse_webpage_once(driver, url, labels_to_remove, scroll_amount) -> pd.DataFrame():
+def take_data_return_df(driver, labels_to_remove, counter) -> pd.DataFrame():
     general_css_selector = {
         "songs": "div.sc-cMhqgX.hQLcyr",
         "artists": "div.sc-esOvli.cfpVgy",
@@ -143,27 +141,21 @@ def parse_webpage_once(driver, url, labels_to_remove, scroll_amount) -> pd.DataF
         "rank": "div.sc-hENMEE.deWhnr",
         "doc": "div.sc-hmyDHa.jWjosp",
         "labels": "div.sc-hAcydR.gdSjQR",
+        "change": "div.sc-ekulBa.jsSggV",
+        "genre": "div.sc-gqPbQI.cMrfWF"
     }
-    # songs, artists, links, labels, rank, doc = None, None, None, None, None, None
-    # sorted_by_doc = False
-    # while not songs or not artists or not links or not rank or not sorted_by_doc or not doc:
-    driver.get(url)
-    # Cannot be lower than 5
-    time.sleep(6)
-    sorted_by_doc = sort_by_doc(driver)
-    time.sleep(0.25)
-    scroll(driver, scroll_amount)
-    time.sleep(1)
-
     songs = driver.find_elements(By.CSS_SELECTOR, "div.sc-eTuwsz.jWHscE")
     links = driver.find_elements(By.CSS_SELECTOR, general_css_selector["links"])
     artists = driver.find_elements(By.CSS_SELECTOR, general_css_selector["artists"])
     rank = driver.find_elements(By.CSS_SELECTOR, general_css_selector["rank"])
     doc = driver.find_elements(By.CSS_SELECTOR, general_css_selector["doc"])
     labels = driver.find_elements(By.CSS_SELECTOR, general_css_selector["labels"])
+    change = driver.find_elements(By.CSS_SELECTOR, general_css_selector["change"])
+    genre = driver.find_elements(By.CSS_SELECTOR, general_css_selector["genre"])
 
-    if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels):
-        print(f"SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)})")
+    if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change):
+        # Replace the last output with the new one
+        print(f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
     else:
         print("Length of lists are not equal")
 
@@ -173,6 +165,8 @@ def parse_webpage_once(driver, url, labels_to_remove, scroll_amount) -> pd.DataF
     rank = parse_rank(rank)
     doc = [div.text for div in doc]
     labels = parse_labels(labels)
+    change = [div.text for div in change]
+    genre = [div.text for div in genre]
 
     # create dataframe with columns
     df = pd.DataFrame()
@@ -182,27 +176,40 @@ def parse_webpage_once(driver, url, labels_to_remove, scroll_amount) -> pd.DataF
     df["Labels"] = labels
     df["Link"] = links
     df["DOC"] = doc
+    df["Change"] = change
+    df["Genre"] = genre
 
     df = remove_songs_with_labels_from_df(df, labels_to_remove)
+    df = remove_songs_with_more_x_doc(df, 30)
+    time.sleep(0.5)
     return df
 
 
 def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
     print("Parsing webpage: " + url)
-    result_dict = {
-        1: parse_webpage_once(driver, url, labels_to_remove, scroll_amount=0),
-        2: parse_webpage_once(driver, url, labels_to_remove, scroll_amount=1),
-        3: parse_webpage_once(driver, url, labels_to_remove, scroll_amount=2),
-        4: parse_webpage_once(driver, url, labels_to_remove, scroll_amount=3),
-        5: parse_webpage_once(driver, url, labels_to_remove, scroll_amount=4),
-    }
+    driver.get(url)
+    # Cannot be lower than 5
+    time.sleep(6)
+    sort_by_doc(driver)
 
-    # Concat values in result dict into a single dataframe
-    result_df = pd.concat(result_dict.values(), axis=0)
+    result = []
 
-    # Remove rows that have the same song as another row
+    time.sleep(0.25)
+    scroll(driver, 1)
+    result.append(take_data_return_df(driver, labels_to_remove, 1))
+    print(1)
+    time.sleep(0.25)
+    scroll(driver, 1)
+    result.append(take_data_return_df(driver, labels_to_remove, 2))
+    time.sleep(0.25)
+    print(2)
+    scroll(driver, 1)
+    result.append(take_data_return_df(driver, labels_to_remove, 3))
+    print(3)
+
+    result_df = pd.concat(result, axis=0)
     result_df = result_df.drop_duplicates(subset="Song", keep="first")
-    print("Successfully parsed webpage")
+    print("\n" + "Successfully parsed webpage")
     return result_df
 
 
@@ -234,6 +241,14 @@ def start_driver_and_login(detach=False):
     return driver
 
 
+# def output_to_excel(excel_dict):
+#     time_string = time.strftime("%Y-%m-%d %H-%M-%S")
+#     filename = f"soundcharts_{time_string}.xlsx"
+#     with pd.ExcelWriter(filename) as writer:
+#         for sheet_name, df in excel_dict.items():
+#             df.to_excel(writer, sheet_name=sheet_name, index=False)
+#     print(f"Saved to {filename}")
+
 def remove_songs_with_labels_from_df(df, labels):
     # Remove songs with labels in the list, check with lowercase
     for label in labels:
@@ -242,60 +257,65 @@ def remove_songs_with_labels_from_df(df, labels):
     return df
 
 
-def run(headless):
+def remove_songs_with_more_x_doc(df, days):
+    df = df[df["DOC"].astype(int) < days]
+    return df
+
+
+def print_estimated_time(time_per_request, number_of_requests):
+    estimated_time = time_per_request * number_of_requests
+    print(f"Number of requests: {number_of_requests}")
+    print(f"Estimated time: {math.floor(estimated_time / 60)}m:{round(estimated_time % 60)}s")
+
+
+def run(country_list, platform_list, filters_list, labels_to_remove, detach):
     start_time = time.time()
-
-    # try:
-    driver = start_driver_and_login(headless)
-
-    country_list = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
-                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
-                    "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-
-    platform_list = ["spotify", "apple-music"]
-    filters_list = ["no_labels"]
-
-    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
+    driver = start_driver_and_login(detach=detach)
 
     results_dict = {}
 
-    time_per_request = 55
-    estimated_time = time_per_request * len(country_list) * len(platform_list) * len(filters_list)
-    print(f"Estimated time: {round(estimated_time / 60)}m:{round(estimated_time % 60)}s")
+    print_estimated_time(22, len(country_list) * len(platform_list) * len(filters_list))
 
     count = 0
     for country in country_list:
         for platform in platform_list:
             for filters in filters_list:
                 try:
+                    task_start_time = time.time()
                     page = Link("song", country, platform, filters)
                     df = parse_webpage(driver, page.link, labels_to_remove)
-                    assert df
-                    results_dict[f"{page.country}_{page.platform}"] = df
+                    # df["Country"] = country
+                    # df["Platform"] = platform
+                    results_dict[f"{country}_{platform}"] = df
+                    task_end_time = time.time()
                     count += 1
+
                     print(f"Finished {count}/{len(country_list) * len(platform_list) * len(filters_list)}")
-                    elapsed_time = time.time() - start_time
-                    time_remaining = estimated_time - elapsed_time
-                    print(f"Time remaining: {round(time_remaining / 60)}m:{round(time_remaining % 60)}s")
+                    time_per_request = task_end_time - task_start_time
+                    total_task_time = time_per_request * len(country_list) * len(platform_list) * len(filters_list)
+                    time_remaining = total_task_time - (time_per_request * count)
+                    print(f"Time remaining: {round(time_remaining / 60)}m:{round(time_remaining % 60)}s (task time: {round(time_per_request)}s)")
 
                 except Exception as e:
                     pass
 
-    def output_to_excel(excel_dict):
-        time_string = time.strftime("%Y-%m-%d %H-%M-%S")
-        filename = f"soundcharts_{time_string}.xlsx"
-        with pd.ExcelWriter(filename) as writer:
-            for sheet_name, df in excel_dict.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+    time_string = time.strftime("%Y-%m-%d %H-%M-%S")
+    filename = f"soundcharts_{time_string}.csv"
+    pd.concat(results_dict.values(), axis=0).to_csv(filename, index=False)
 
-    output_to_excel(results_dict)
     end_time = time.time()
-    print(f"Time taken: {round((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
-
-    # except Exception as e:
-    #     print(e)
+    print(f"Finished - Time taken: {end_time - start_time}")
 
 
 if __name__ == "__main__":
-    run(headless=True)
+    # country_list = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
+    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
+    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
+    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    country_list = ['BE']
+
+    platform_list = ["spotify", "apple-music"]
+    filters_list = ["no_labels"]
+
+    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
+    run(country_list, platform_list, filters_list, labels_to_remove, detach=True)
