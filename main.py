@@ -1,4 +1,5 @@
 import math
+import sys
 import time
 
 import pandas as pd
@@ -104,8 +105,9 @@ class Link:
             "shazam": "shazam-top-200-world"
         }
         self.filters_dict = {
-            # "no_labels": "eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D",
-            "no_labels": ""
+            # "no_labels": "eyJmbHQiOiJTZWxmIHJlbGVhc2VkfFVua25vd24ifQ%3D%3D",
+            "no_labels": "eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D",
+
         }
         self.chart = charts[platform] if country == "GLOBAL" else "top-200-" + country
         self.chart_type = chart_type
@@ -133,16 +135,16 @@ def parse_labels(labels):
     return labels
 
 
-def take_data_return_df(driver, labels_to_remove, counter) -> pd.DataFrame():
+def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
     general_css_selector = {
-        "songs": "div.sc-cMhqgX.hQLcyr",
+        "songs": "div.sc-eTuwsz.jWHscE",
         "artists": "div.sc-esOvli.cfpVgy",
         "links": "img.sc-epnACN.ksrdaN",
         "rank": "div.sc-hENMEE.deWhnr",
         "doc": "div.sc-hmyDHa.jWjosp",
         "labels": "div.sc-hAcydR.gdSjQR",
         "change": "div.sc-ekulBa.jsSggV",
-        "genre": "div.sc-gqPbQI.cMrfWF"
+        "genre": "div.sc-eTuwsz.jWHscE"
     }
     songs = driver.find_elements(By.CSS_SELECTOR, "div.sc-eTuwsz.jWHscE")
     links = driver.find_elements(By.CSS_SELECTOR, general_css_selector["links"])
@@ -153,36 +155,54 @@ def take_data_return_df(driver, labels_to_remove, counter) -> pd.DataFrame():
     change = driver.find_elements(By.CSS_SELECTOR, general_css_selector["change"])
     genre = driver.find_elements(By.CSS_SELECTOR, general_css_selector["genre"])
 
-    if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change):
+    def parse_genre(genre):
+        songs_and_genres = [div.text for div in genre]
+
+        def remove_before_first_newline(s):
+            parts = s.split("\n", 1)  # split the string into two parts at the first newline
+            return parts[1] if len(parts) > 1 else ''
+
+        genres = [remove_before_first_newline(song) for song in songs_and_genres]
+        return genres
+
+    if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change) == len(genre):
         # Replace the last output with the new one
-        print(f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
+        sys.stdout.write("\r" + f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
+        songs = [div.text for div in songs]
+        links = [parse_img_link(link) for link in links]
+        artists = extract_names([div.text for div in artists])
+        rank = parse_rank(rank)
+        doc = [div.text for div in doc]
+        labels = parse_labels(labels)
+        change = [div.text for div in change]
+        genre = parse_genre(genre)
+
+        # create dataframe with columns
+        df = pd.DataFrame()
+        df["rank"] = rank
+        df["Song"] = songs
+        df["Artists"] = artists
+        df["Labels"] = labels
+        df["Link"] = links
+        df["DOC"] = doc
+        df["Change"] = change
+        df["Genre"] = genre
+
+        df = remove_songs_with_labels_from_df(df, labels_to_remove)
+        df = remove_songs_with_more_x_doc(df, 30)
+        return df
+
     else:
+        print("Genres: " + str(len(genre)))
+        print("Songs: " + str(len(songs)))
+        print("Artists: " + str(len(artists)))
+        print("Links: " + str(len(links)))
+        print("Rank: " + str(len(rank)))
+        print("DOC: " + str(len(doc)))
+        print("Labels: " + str(len(labels)))
+        print("Change: " + str(len(change)))
+
         print("Length of lists are not equal")
-
-    songs = [div.text for div in songs]
-    links = [parse_img_link(link) for link in links]
-    artists = extract_names([div.text for div in artists])
-    rank = parse_rank(rank)
-    doc = [div.text for div in doc]
-    labels = parse_labels(labels)
-    change = [div.text for div in change]
-    genre = [div.text for div in genre]
-
-    # create dataframe with columns
-    df = pd.DataFrame()
-    df["rank"] = rank
-    df["Song"] = songs
-    df["Artists"] = artists
-    df["Labels"] = labels
-    df["Link"] = links
-    df["DOC"] = doc
-    df["Change"] = change
-    df["Genre"] = genre
-
-    df = remove_songs_with_labels_from_df(df, labels_to_remove)
-    df = remove_songs_with_more_x_doc(df, 30)
-    time.sleep(0.5)
-    return df
 
 
 def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
@@ -193,19 +213,10 @@ def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
     sort_by_doc(driver)
 
     result = []
-
-    time.sleep(0.25)
-    scroll(driver, 1)
-    result.append(take_data_return_df(driver, labels_to_remove, 1))
-    print(1)
-    time.sleep(0.25)
-    scroll(driver, 1)
-    result.append(take_data_return_df(driver, labels_to_remove, 2))
-    time.sleep(0.25)
-    print(2)
-    scroll(driver, 1)
-    result.append(take_data_return_df(driver, labels_to_remove, 3))
-    print(3)
+    for i in range(5):
+        time.sleep(0.25)
+        scroll(driver, 1)
+        result.append(take_data_return_df(driver, labels_to_remove, i))
 
     result_df = pd.concat(result, axis=0)
     result_df = result_df.drop_duplicates(subset="Song", keep="first")
@@ -262,19 +273,19 @@ def remove_songs_with_more_x_doc(df, days):
     return df
 
 
-def print_estimated_time(time_per_request, number_of_requests):
-    estimated_time = time_per_request * number_of_requests
-    print(f"Number of requests: {number_of_requests}")
-    print(f"Estimated time: {math.floor(estimated_time / 60)}m:{round(estimated_time % 60)}s")
-
-
 def run(country_list, platform_list, filters_list, labels_to_remove, detach):
     start_time = time.time()
+
+    # try:
     driver = start_driver_and_login(detach=detach)
 
     results_dict = {}
 
-    print_estimated_time(22, len(country_list) * len(platform_list) * len(filters_list))
+    time_per_request = 22
+    number_of_requests = len(country_list) * len(platform_list) * len(filters_list)
+    estimated_time = time_per_request * number_of_requests
+    print(f"Number of requests: {number_of_requests}")
+    print(f"Estimated time: {math.floor(estimated_time / 60)}m:{round(estimated_time % 60)}s")
 
     count = 0
     for country in country_list:
@@ -284,12 +295,11 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
                     task_start_time = time.time()
                     page = Link("song", country, platform, filters)
                     df = parse_webpage(driver, page.link, labels_to_remove)
-                    # df["Country"] = country
-                    # df["Platform"] = platform
-                    results_dict[f"{country}_{platform}"] = df
+                    df["Country"] = country
+                    df["Platform"] = platform
+                    results_dict[f"{page.country}_{page.platform}"] = df
                     task_end_time = time.time()
                     count += 1
-
                     print(f"Finished {count}/{len(country_list) * len(platform_list) * len(filters_list)}")
                     time_per_request = task_end_time - task_start_time
                     total_task_time = time_per_request * len(country_list) * len(platform_list) * len(filters_list)
