@@ -146,7 +146,7 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         "change": "div.sc-ekulBa.jsSggV",
         "genre": "div.sc-eTuwsz.jWHscE"
     }
-    songs = driver.find_elements(By.CSS_SELECTOR, "div.sc-eTuwsz.jWHscE")
+    songs = driver.find_elements(By.CSS_SELECTOR, general_css_selector["songs"])
     links = driver.find_elements(By.CSS_SELECTOR, general_css_selector["links"])
     artists = driver.find_elements(By.CSS_SELECTOR, general_css_selector["artists"])
     rank = driver.find_elements(By.CSS_SELECTOR, general_css_selector["rank"])
@@ -158,17 +158,29 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
     def parse_genre(genre):
         songs_and_genres = [div.text for div in genre]
 
+        genre_list = ["Pop", "Rock", "Hip Hop", "Rap", "R&B", "Soul", "Jazz", "Blues", "Country", "Folk", "Reggae", "Dance", "Electronic",
+                      "Classical", "Metal", "Punk", "Indie", "Alternative", "World", "Latin", "K-Pop", "J-Pop", "Anime", "Soundtrack",
+                      "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno", "Trance", "Dubstep", ]
+
         def remove_before_first_newline(s):
-            parts = s.split("\n", 1)  # split the string into two parts at the first newline
-            return parts[1] if len(parts) > 1 else ''
+            parts = s.split("\n")  # split the string into two parts at the first newline
+            # parts = parts[:-1]  # remove the last part
+            parts = [part for part in parts if part in genre_list]
+            return "-".join(parts)  # join the parts back together with a hyphen
 
         genres = [remove_before_first_newline(song) for song in songs_and_genres]
+        print(genres)
         return genres
+
+    def parse_songs(songs_and_genre):
+        songs_and_genres = [div.text for div in songs_and_genre]
+        songs = [div.split("\n", 1)[0] for div in songs_and_genres]
+        return songs
 
     if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change) == len(genre):
         # Replace the last output with the new one
         sys.stdout.write("\r" + f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
-        songs = [div.text for div in songs]
+        songs = parse_songs(songs)
         links = [parse_img_link(link) for link in links]
         artists = extract_names([div.text for div in artists])
         rank = parse_rank(rank)
@@ -189,7 +201,7 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         df["Genre"] = genre
 
         df = remove_songs_with_labels_from_df(df, labels_to_remove)
-        df = remove_songs_with_more_x_doc(df, 30)
+        df = remove_songs_with_more_than_x_doc(df, 30)
         return df
 
     else:
@@ -252,13 +264,14 @@ def start_driver_and_login(detach=False):
     return driver
 
 
-# def output_to_excel(excel_dict):
-#     time_string = time.strftime("%Y-%m-%d %H-%M-%S")
-#     filename = f"soundcharts_{time_string}.xlsx"
-#     with pd.ExcelWriter(filename) as writer:
-#         for sheet_name, df in excel_dict.items():
-#             df.to_excel(writer, sheet_name=sheet_name, index=False)
-#     print(f"Saved to {filename}")
+def output_to_excel_from_dict(excel_dict):
+    time_string = time.strftime("%Y-%m-%d %H-%M-%S")
+    filename = f"soundcharts_{time_string}.xlsx"
+    with pd.ExcelWriter(filename) as writer:
+        for sheet_name, df in excel_dict.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    print(f"Saved to {filename}")
+
 
 def remove_songs_with_labels_from_df(df, labels):
     # Remove songs with labels in the list, check with lowercase
@@ -268,7 +281,7 @@ def remove_songs_with_labels_from_df(df, labels):
     return df
 
 
-def remove_songs_with_more_x_doc(df, days):
+def remove_songs_with_more_than_x_doc(df, days):
     df = df[df["DOC"].astype(int) < days]
     return df
 
@@ -311,10 +324,12 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
 
     time_string = time.strftime("%Y-%m-%d %H-%M-%S")
     filename = f"soundcharts_{time_string}.csv"
-    pd.concat(results_dict.values(), axis=0).to_csv(filename, index=False)
+    df = (pd.concat(results_dict.values(), axis=0))
+    df.to_csv(filename, index=False)
 
     end_time = time.time()
     print(f"Finished - Time taken: {end_time - start_time}")
+    print(f"{len(df)} results saved to {filename}")
 
 
 if __name__ == "__main__":
@@ -324,7 +339,7 @@ if __name__ == "__main__":
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
     country_list = ['BE']
 
-    platform_list = ["spotify", "apple-music"]
+    platform_list = ["spotify"]
     filters_list = ["no_labels"]
 
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
