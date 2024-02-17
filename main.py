@@ -45,11 +45,11 @@ def scroll(driver, scroll_amount):
     if scroll_amount == 0:
         return
     try:
-        time.sleep(1)
+        time.sleep(0.5)
         element = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-gKLXLV.fAiEjs.custom-scrollbar"))
         if element:
             driver.execute_script("arguments[0].scrollTop += arguments[0].scrollHeight*0.2*arguments[1]", element, scroll_amount)
-            time.sleep(1)
+            time.sleep(0.5)
     except Exception as e:
         print("Could not scroll")
 
@@ -135,6 +135,28 @@ def parse_labels(labels):
     return labels
 
 
+def parse_genre(genre):
+    songs_and_genres = [div.text for div in genre]
+
+    genre_list = ["Pop", "Rock", "Hip Hop", "Rap", "R&B", "Soul", "Jazz", "Blues", "Country", "Folk", "Reggae", "Dance", "Electronic",
+                  "Classical", "Metal", "Punk", "Indie", "Alternative", "World", "Latin", "K-Pop", "J-Pop", "Anime", "Soundtrack",
+                  "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno", "Trance", "Dubstep", ]
+
+    def remove_before_first_newline(s):
+        parts = s.split("\n")  # split the string into two parts at the first newline
+        parts = [part for part in parts if part in genre_list]
+        return "-".join(parts)  # join the parts back together with a hyphen
+
+    genres = [remove_before_first_newline(song) for song in songs_and_genres]
+    return genres
+
+
+def parse_songs(songs_and_genre):
+    songs_and_genres = [div.text for div in songs_and_genre]
+    songs = [div.split("\n", 1)[0] for div in songs_and_genres]
+    return songs
+
+
 def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
     general_css_selector = {
         "songs": "div.sc-eTuwsz.jWHscE",
@@ -154,28 +176,6 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
     labels = driver.find_elements(By.CSS_SELECTOR, general_css_selector["labels"])
     change = driver.find_elements(By.CSS_SELECTOR, general_css_selector["change"])
     genre = driver.find_elements(By.CSS_SELECTOR, general_css_selector["genre"])
-
-    def parse_genre(genre):
-        songs_and_genres = [div.text for div in genre]
-
-        genre_list = ["Pop", "Rock", "Hip Hop", "Rap", "R&B", "Soul", "Jazz", "Blues", "Country", "Folk", "Reggae", "Dance", "Electronic",
-                      "Classical", "Metal", "Punk", "Indie", "Alternative", "World", "Latin", "K-Pop", "J-Pop", "Anime", "Soundtrack",
-                      "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno", "Trance", "Dubstep", ]
-
-        def remove_before_first_newline(s):
-            parts = s.split("\n")  # split the string into two parts at the first newline
-            # parts = parts[:-1]  # remove the last part
-            parts = [part for part in parts if part in genre_list]
-            return "-".join(parts)  # join the parts back together with a hyphen
-
-        genres = [remove_before_first_newline(song) for song in songs_and_genres]
-        print(genres)
-        return genres
-
-    def parse_songs(songs_and_genre):
-        songs_and_genres = [div.text for div in songs_and_genre]
-        songs = [div.split("\n", 1)[0] for div in songs_and_genres]
-        return songs
 
     if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change) == len(genre):
         # Replace the last output with the new one
@@ -286,38 +286,53 @@ def remove_songs_with_more_than_x_doc(df, days):
     return df
 
 
-def run(country_list, platform_list, filters_list, labels_to_remove, detach):
-    start_time = time.time()
-
-    # try:
-    driver = start_driver_and_login(detach=detach)
-
-    results_dict = {}
-
+def estimate_runtime(country_list, platform_list, filters_list):
     time_per_request = 22
     number_of_requests = len(country_list) * len(platform_list) * len(filters_list)
     estimated_time = time_per_request * number_of_requests
     print(f"Number of requests: {number_of_requests}")
     print(f"Estimated time: {math.floor(estimated_time / 60)}m:{round(estimated_time % 60)}s")
 
+
+def run(country_list, platform_list, filters_list, labels_to_remove, detach):
+    start_time = time.time()
+
+    driver = start_driver_and_login(detach=detach)
+
+    results_dict = {}
+
+    estimate_runtime(country_list, platform_list, filters_list)
+
+    total_tasks = len(country_list) * len(platform_list) * len(filters_list)
+
     count = 0
     for country in country_list:
         for platform in platform_list:
             for filters in filters_list:
                 try:
+                    # Start the timer
                     task_start_time = time.time()
+
+                    # Create the link
                     page = Link("song", country, platform, filters)
+                    # Parse the webpage
                     df = parse_webpage(driver, page.link, labels_to_remove)
+                    # Add the country and platform to the dataframe
                     df["Country"] = country
                     df["Platform"] = platform
+                    # Add the dataframe to the dictionary
                     results_dict[f"{page.country}_{page.platform}"] = df
+
+                    # End the timer
                     task_end_time = time.time()
                     count += 1
-                    print(f"Finished {count}/{len(country_list) * len(platform_list) * len(filters_list)}")
+
+                    # Print the progress
                     time_per_request = task_end_time - task_start_time
-                    total_task_time = time_per_request * len(country_list) * len(platform_list) * len(filters_list)
+                    total_task_time = time_per_request * total_tasks
                     time_remaining = total_task_time - (time_per_request * count)
-                    print(f"Time remaining: {round(time_remaining / 60)}m:{round(time_remaining % 60)}s (task time: {round(time_per_request)}s)")
+                    print(f"Finished {count}/{total_tasks} - Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
+
 
                 except Exception as e:
                     pass
@@ -328,19 +343,16 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
     df.to_csv(filename, index=False)
 
     end_time = time.time()
-    print(f"Finished - Time taken: {end_time - start_time}")
+    print(f"Finished - Time taken: {round(end_time - start_time, 2)}")
     print(f"{len(df)} results saved to {filename}")
 
 
 if __name__ == "__main__":
-    # country_list = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
-    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
-    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ['BE']
-
-    platform_list = ["spotify"]
-    filters_list = ["no_labels"]
-
-    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
-    run(country_list, platform_list, filters_list, labels_to_remove, detach=True)
+    COUNTRY_LIST = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
+                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
+                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
+                    "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    PLATFORM_LIST = ["spotify", "apple-music", "shazam"]
+    FILTERS_LIST = ["no_labels"]
+    LABELS_TO_REMOVE = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
+    run(COUNTRY_LIST, PLATFORM_LIST, FILTERS_LIST, LABELS_TO_REMOVE, detach=True)
