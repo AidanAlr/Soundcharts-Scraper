@@ -100,7 +100,7 @@ def sort_by_doc(driver):
 class Link:
     def __init__(self, chart_type, country, platform, filters=None):
         charts = {
-            "spotify": "global-28",
+            "spotify": "",
             "apple-music": "top-100-global",
             "shazam": "shazam-top-200-world"
         }
@@ -109,7 +109,7 @@ class Link:
             "no_labels": "eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D",
 
         }
-        self.chart = charts[platform] if country == "GLOBAL" else "top-200-" + country
+        self.chart = charts[platform]
         self.chart_type = chart_type
         self.country = country
         self.platform = platform
@@ -260,7 +260,7 @@ def start_driver_and_login(detach=False):
 
     print("Logged in")
     # Wait for the page to load
-    time.sleep(4)
+    time.sleep(6)
     return driver
 
 
@@ -312,7 +312,6 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
                 try:
                     # Start the timer
                     task_start_time = time.time()
-
                     # Create the link
                     page = Link("song", country, platform, filters)
                     # Parse the webpage
@@ -331,28 +330,68 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
                     time_per_request = task_end_time - task_start_time
                     total_task_time = time_per_request * total_tasks
                     time_remaining = total_task_time - (time_per_request * count)
-                    print(f"Finished {count}/{total_tasks} - Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
-
+                    print(
+                        f"Task {count}/{total_tasks} completed - Time taken: "
+                        f"{math.floor(time_per_request / 60)}m:{round(time_per_request % 60)}s "
+                        f"- Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
 
                 except Exception as e:
+                    print(e)
                     pass
 
-    time_string = time.strftime("%Y-%m-%d %H-%M-%S")
-    filename = f"soundcharts_{time_string}.csv"
     df = (pd.concat(results_dict.values(), axis=0))
+    songs_to_get_stats_for = len(df)
+
+    counter = 0
+
+    def get_streams(link, counter=counter, songs_to_get_stats_for=songs_to_get_stats_for):
+        songs_to_get_stats_for -= 1
+        print(f"{songs_to_get_stats_for} songs remaining. Estimated time: {math.floor(songs_to_get_stats_for * 4 / 60)}m:"
+              f"{round(songs_to_get_stats_for * 4 % 60)}s")
+
+        def change_to_spotify(link):
+            link = link.replace("overview", "trends")
+            return link
+
+        link = change_to_spotify(link)
+        driver.get(link)
+        time.sleep(1)
+        streams = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")).text
+        streams = streams.split("\n")[-1].replace("Spotify streams", "")
+        while not streams:
+            time.sleep(0.1)
+            streams = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")).text
+            streams = streams.split("\n")[-1].replace("Spotify streams", "")
+
+        return streams
+
+    df["Streams"] = df["Link"].apply(get_streams)
+
+    filename = f"soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv"
     df.to_csv(filename, index=False)
 
     end_time = time.time()
-    print(f"Finished - Time taken: {round(end_time - start_time, 2)}")
+    print(f"Finished - Time taken: {math.floor((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
     print(f"{len(df)} results saved to {filename}")
+
+    completed = True
+    return completed
 
 
 if __name__ == "__main__":
-    COUNTRY_LIST = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
-                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
-                    "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    # COUNTRY_LIST = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
+    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
+    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
+    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    COUNTRY_LIST = ["SE", "FI", "FR", "DE", "GR", "GT"]
     PLATFORM_LIST = ["spotify", "apple-music", "shazam"]
     FILTERS_LIST = ["no_labels"]
     LABELS_TO_REMOVE = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
-    run(COUNTRY_LIST, PLATFORM_LIST, FILTERS_LIST, LABELS_TO_REMOVE, detach=True)
+    # If it fails to run, try to run it again
+    while True:
+        try:
+            run(COUNTRY_LIST, PLATFORM_LIST, FILTERS_LIST, LABELS_TO_REMOVE, detach=True)
+            break
+        except Exception as e:
+            print(e)
+            print("Failed to complete scrape, trying again")
