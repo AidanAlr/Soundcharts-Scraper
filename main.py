@@ -339,11 +339,11 @@ def get_streams(link, driver):
             tooltip_size = locate_and_move_to_spotify_chart(driver)
 
             # Find the child element which holds the stream data
-            mouse_shifts = 11
+            mouse_shifts = 14
             for i in range(mouse_shifts):
                 # Move the mouse horizontally by 20% of the tooltip wrapper size
                 if streams:
-                    horizontal_move = tooltip_size['width'] * 0.05
+                    horizontal_move = tooltip_size['width'] * 0.04
                     ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
 
                 child_elements = driver.find_elements(By.CSS_SELECTOR, "div.sc-laTMn.ktlmrZ")
@@ -367,21 +367,23 @@ def get_followers(artist, driver):
     link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
     followers = []
     attempts = 0
-    while not followers and attempts < 3:
+    while not followers and attempts < 2:
         try:
             attempts += 1
             driver.get(link)
             time.sleep(5)
             followers = WebDriverWait(driver, 5).until(
                 lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
-            followers = [div.text for div in followers]
+            print(f"Got followers for {artist}")
         except Exception as e:
-            print("Could not get followers for:" + artist)
-            pass
+            print("Could not get followers for:" + artist + "retrying...")
+            if not followers and attempts == 3:
+                return "Error"
 
-    if not followers:
-        return "Error"
+    followers = [div.text for div in followers]
     spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
+    if not spotify_followers:
+        return "Error"
     spotify_followers = spotify_followers[0].split("\n")[1]
     return spotify_followers
 
@@ -391,33 +393,42 @@ def parse_streams_into_columns(df):
     streams_df = df["Streams"].str.split("\n", expand=True)
     streams_df = pd.DataFrame(streams_df)
     streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+    if len(streams_df[streams_df.columns[-1]].iloc[0]) < 5:
+        streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+    streams_df.to_csv("streams.csv")
+
     # Extract column names from first row
     streams_df.columns = streams_df.iloc[1].str.split(" - ", expand=True)[0]
-    streams_df.to_csv("saved_here_2.csv", index=False)
 
     # Remove the dates from cells
-    streams_df = streams_df.applymap(lambda x: x.split(" - ")[-1] if x else x)
-    streams_df = streams_df.applymap(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
+    streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
+    streams_df = streams_df.map(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
     streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
-    streams_df.to_csv("saved_here_3.csv", index=False)
-    last_day = streams_df[streams_df.columns[-1]]
+    streams_df.drop(streams_df.columns[0], axis=1, inplace=True)
 
-    last_3_days_avg = streams_df[streams_df.columns[-3:]].mean(axis=1)
+    streams_df.to_csv("streams2.csv")
+
+    last_day = streams_df[streams_df.columns[-1]]
+    print(last_day)
+    last_3_days_avg = streams_df[streams_df.columns[-3:-1]].mean(axis=1)
     # if the value in the last day is nan  use last 3 days average
+    print(last_3_days_avg)
     last_day = last_day.combine_first(last_3_days_avg)
+    print(last_day)
+
     temp_3_day = ((last_day - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100)
     temp_7_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
     temp_14_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
+
     new_df = pd.DataFrame()
     new_df["Yesterday"] = streams_df[streams_df.columns[-1]]
     new_df["3_day_avg"] = last_3_days_avg
     new_df["3_day_%_change"] = temp_3_day
     new_df["7_day_%_change"] = temp_7_day
     new_df["14_day_%_change"] = temp_14_day
-    new_df.to_csv("saved_here_4.csv", index=False)
 
     for column in new_df.columns:
-        new_df[column] = new_df[column].apply(lambda x: round(x, 2) if isinstance(x, float) else x)
+        new_df[column] = new_df[column].apply(lambda x: round(x) if isinstance(x, float) else x)
 
     return new_df
 
@@ -481,27 +492,16 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
 
     df["Streams"] = df["Link"].apply(get_streams, driver=driver)
     time.sleep(2)
-
     df["Followers"] = df["Artists"].apply(get_followers, driver=driver)
-
-    print("df after followers")
-    print(df)
-    print("streams df")
-    print(parse_streams_into_columns(df))
-    df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
-    print(2)
-    # Display last 4 columns
-    print(df[df.columns[-4:]])
-
-    # Drop rows with Yesterday less than 2000
-    df = df[df["Yesterday"] > 2000]
-    # Sort df by song
-    df = df.sort_values(by="Song")
-    df.to_csv("saved_here_2.csv", index=False)
-    return df
+    result_df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
+    result_df["Followers"] = result_df["Followers"].apply(lambda x: x.replace(",", "") if x and x.replace(",", "").isdigit() else x)
+    result_df["Followers"] = result_df['Followers'].apply(pd.to_numeric, errors='coerce')
+    result_df = result_df[result_df["Followers"] < 50000]
+    result_df = result_df[result_df["3_day_avg"] > 2000]
+    result_dfs_to_concat.append(result_df)
 
 
-def run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
+def run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
     start_time = time.time()
 
     number_of_threads = number_of_threads
@@ -522,14 +522,11 @@ def run_with_threading(country_list, platform_list, filters_list, labels_to_remo
         threads.append(t)
         start = end
 
-    result_dfs = [t.join() for t in threads]
-
-    for df in result_dfs:
-        print(df)
-
-    pd.concat(result_dfs, axis=0).to_csv(f"soundcharts_{time.strftime('%Y-%m-%d %H-%M-%S')}.csv", index=False)
+    for t in threads:
+        t.join()
 
     end_time = time.time()
+    pd.concat(result_dfs_to_concat, axis=0).to_csv(f'Soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv', index=False)
     print(f"Finished - Time taken: {math.floor((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
 
 
@@ -537,6 +534,8 @@ if __name__ == "__main__":
     global songs_to_get_stats_for
     global project_tasks
     global project_tasks_completed
+    global result_dfs_to_concat
+    result_dfs_to_concat = []
     project_tasks_completed = 0
     project_tasks = 0
     songs_to_get_stats_for = 0
@@ -544,11 +543,11 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["SE", "GB", "DE"]
+    country_list = ["SE", "GB", ]
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
                                                                                                                                      "Def Jam",
                         "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music", "Warner Music", ]
 
-    run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=4, test_mode=True)
+    run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=1, test_mode=True)
