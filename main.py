@@ -1,12 +1,14 @@
 import math
-import sys
 import time
+from threading import Thread
 
 import pandas as pd
 from selenium import webdriver
+from selenium.webdriver import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -46,7 +48,7 @@ def scroll(driver, scroll_amount):
         return
     try:
         time.sleep(0.5)
-        element = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-gKLXLV.fAiEjs.custom-scrollbar"))
+        element = WebDriverWait(driver, 10).until(lambda drvr: drvr.find_element(By.CSS_SELECTOR, "div.sc-gKLXLV.fAiEjs.custom-scrollbar"))
         if element:
             driver.execute_script("arguments[0].scrollTop += arguments[0].scrollHeight*0.2*arguments[1]", element, scroll_amount)
             time.sleep(0.5)
@@ -140,11 +142,13 @@ def parse_genre(genre):
 
     genre_list = ["Pop", "Rock", "Hip Hop", "Rap", "R&B", "Soul", "Jazz", "Blues", "Country", "Folk", "Reggae", "Dance", "Electronic",
                   "Classical", "Metal", "Punk", "Indie", "Alternative", "World", "Latin", "K-Pop", "J-Pop", "Anime", "Soundtrack",
-                  "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno", "Trance", "Dubstep", ]
+                  "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno", "Trance", "Dubstep",
+                  "African", "American", "Asian", "European", "Indian", "Middle Eastern", "Oceanian", "Caribbean", "Latin American",
+                  "Instrumental", "Spirituals", "Spoken", "Sports", "Others", "Unknown", "Mena"]
 
     def remove_before_first_newline(s):
         parts = s.split("\n")  # split the string into two parts at the first newline
-        parts = [part for part in parts if part in genre_list]
+        parts = [part.strip() for part in parts if part in genre_list]
         return "-".join(parts)  # join the parts back together with a hyphen
 
     genres = [remove_before_first_newline(song) for song in songs_and_genres]
@@ -179,7 +183,7 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
 
     if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change) == len(genre):
         # Replace the last output with the new one
-        sys.stdout.write("\r" + f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
+        # sys.stdout.write("\r" + f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
         songs = parse_songs(songs)
         links = [parse_img_link(link) for link in links]
         artists = extract_names([div.text for div in artists])
@@ -217,7 +221,7 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         print("Length of lists are not equal")
 
 
-def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
+def parse_webpage(driver, url, labels_to_remove, test_mode=False) -> pd.DataFrame():
     print("Parsing webpage: " + url)
     driver.get(url)
     # Cannot be lower than 5
@@ -225,7 +229,11 @@ def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
     sort_by_doc(driver)
 
     result = []
-    for i in range(5):
+
+    scroll_count = 5
+    if test_mode:
+        scroll_count = 1
+    for i in range(scroll_count):
         time.sleep(0.25)
         scroll(driver, 1)
         result.append(take_data_return_df(driver, labels_to_remove, i))
@@ -294,8 +302,66 @@ def estimate_runtime(country_list, platform_list, filters_list):
     print(f"Estimated time: {math.floor(estimated_time / 60)}m:{round(estimated_time % 60)}s")
 
 
-def run(country_list, platform_list, filters_list, labels_to_remove, detach):
-    start_time = time.time()
+def change_to_spotify(link):
+    link = link.replace("overview", "trends")
+    return link
+
+
+def print_current_songs_time_remaining():
+    global songs_to_get_stats_for
+    songs_to_get_stats_for -= 1
+
+    print(f"{songs_to_get_stats_for} songs remaining. Estimated time: {math.floor(songs_to_get_stats_for * 4 / 60)}m:"
+          f"{round(songs_to_get_stats_for * 4 % 60)}s")
+
+
+def locate_and_move_to_spotify_chart(driver):
+    charts = WebDriverWait(driver, 4).until(
+        EC.visibility_of_all_elements_located((By.CSS_SELECTOR, "path.recharts-curve.recharts-line-curve")))
+    charts = min(charts, key=lambda x: x.location['x'] + x.location['y'])
+    ActionChains(driver).move_to_element(charts).perform()
+    tooltip_size = charts.size
+    return tooltip_size
+
+
+def get_streams(link, driver):
+    try:
+        print_current_songs_time_remaining()
+        streams = ""
+        attempts = 0
+        link = change_to_spotify(link)
+        while not streams and attempts < 4:
+            attempts += 1
+            driver.get(link)
+            time.sleep(2)
+
+            # Find the parent element and move to it
+            tooltip_size = locate_and_move_to_spotify_chart(driver)
+
+            # Find the child element which holds the stream data
+            mouse_shifts = 11
+            for i in range(mouse_shifts):
+                # Move the mouse horizontally by 20% of the tooltip wrapper size
+                if streams:
+                    horizontal_move = tooltip_size['width'] * 0.05
+                    ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
+
+                child_elements = driver.find_elements(By.CSS_SELECTOR, "div.sc-laTMn.ktlmrZ")
+                child_elements = [element.text for element in child_elements][0].split("\n")
+                date, daily_streams = child_elements[0], child_elements[-1]
+                daily_streams = daily_streams.split(" ")[-1]
+                streams += f"{date} - {daily_streams}\n"
+
+        return streams
+
+    except Exception as e:
+        print("Could not get streams for:" + link)
+        return "Error"
+
+
+def run(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
+    global project_tasks_completed
+    global project_tasks
 
     driver = start_driver_and_login(detach=detach)
 
@@ -304,6 +370,7 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
     estimate_runtime(country_list, platform_list, filters_list)
 
     total_tasks = len(country_list) * len(platform_list) * len(filters_list)
+    project_tasks += total_tasks
 
     count = 0
     for country in country_list:
@@ -315,7 +382,8 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
                     # Create the link
                     page = Link("song", country, platform, filters)
                     # Parse the webpage
-                    df = parse_webpage(driver, page.link, labels_to_remove)
+
+                    df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
                     # Add the country and platform to the dataframe
                     df["Country"] = country
                     df["Platform"] = platform
@@ -328,70 +396,111 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach):
 
                     # Print the progress
                     time_per_request = task_end_time - task_start_time
-                    total_task_time = time_per_request * total_tasks
+                    total_task_time = time_per_request * project_tasks - project_tasks_completed
                     time_remaining = total_task_time - (time_per_request * count)
+
+                    project_tasks_completed += 1
                     print(
-                        f"Task {count}/{total_tasks} completed - Time taken: "
+                        f"Task {project_tasks_completed}/{project_tasks} completed - Time taken: "
                         f"{math.floor(time_per_request / 60)}m:{round(time_per_request % 60)}s "
                         f"- Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
-
                 except Exception as e:
                     print(e)
                     pass
 
     df = (pd.concat(results_dict.values(), axis=0))
-    songs_to_get_stats_for = len(df)
+    df = df.drop_duplicates(subset="Song", keep="first")
 
-    counter = 0
+    if test_mode:
+        df = df.head(2)
 
-    def get_streams(link, counter=counter, songs_to_get_stats_for=songs_to_get_stats_for):
-        songs_to_get_stats_for -= 1
-        print(f"{songs_to_get_stats_for} songs remaining. Estimated time: {math.floor(songs_to_get_stats_for * 4 / 60)}m:"
-              f"{round(songs_to_get_stats_for * 4 % 60)}s")
+    global songs_to_get_stats_for
+    songs_to_get_stats_for += len(df)
 
-        def change_to_spotify(link):
-            link = link.replace("overview", "trends")
-            return link
+    df["Streams"] = df["Link"].apply(get_streams, driver=driver)
 
-        link = change_to_spotify(link)
-        driver.get(link)
-        time.sleep(1)
-        streams = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")).text
-        streams = streams.split("\n")[-1].replace("Spotify streams", "")
-        while not streams:
-            time.sleep(0.1)
-            streams = WebDriverWait(driver, 10).until(lambda driver: driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")).text
-            streams = streams.split("\n")[-1].replace("Spotify streams", "")
+    def parse_streams_into_columns(df):
+        # Split the "Streams" column into separate columns for each date
+        streams_df = df["Streams"].str.split("\n", expand=True)
+        streams_df = pd.DataFrame(streams_df)
+        streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+        # Extract column names from first row
+        streams_df.columns = streams_df.iloc[0].str.split(" - ", expand=True)[0]
+        # Remove the dates from cells
+        streams_df = streams_df.applymap(lambda x: x.split(" - ")[-1] if x else x)
+        # Change to int if x is a number
+        streams_df = streams_df.applymap(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
+        streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
+        temp_3_day = (streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100
+        temp_7_day = (streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
+        temp_14_day = ((streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100)
 
-        return streams
+        new_df = pd.DataFrame()
+        new_df["Yesterday"] = streams_df[streams_df.columns[-1]]
+        new_df["3_day_%_change"] = temp_3_day
+        new_df["7_day_%_change"] = temp_7_day
+        new_df["14_day_%_change"] = temp_14_day
 
-    df["Streams"] = df["Link"].apply(get_streams)
+        for column in new_df.columns:
+            new_df[column] = new_df[column].apply(lambda x: round(x, 2) if isinstance(x, float) else x)
+        return new_df
 
-    filename = f"soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv"
-    df.to_csv(filename, index=False)
-
-    end_time = time.time()
-    print(f"Finished - Time taken: {math.floor((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
-    print(f"{len(df)} results saved to {filename}")
+    df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
     completed = True
-    return completed
+    return df
+
+
+def run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
+    start_time = time.time()
+
+    number_of_threads = number_of_threads
+    threads = []
+
+    if len(country_list) < number_of_threads:
+        number_of_threads = len(country_list)
+
+    tasks_per_thread = len(country_list) // number_of_threads
+    extra_tasks = len(country_list) % number_of_threads
+
+    start = 0
+    for i in range(number_of_threads):
+        end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
+        t = Thread(target=run, args=(country_list[start:end], platform_list, filters_list,
+                                     labels_to_remove, detach, number_of_threads, test_mode))
+        t.start()
+        threads.append(t)
+        start = end
+
+    result_dfs = [t.join() for t in threads]
+
+    pd.concat(result_dfs, axis=0).to_csv(f"soundcharts_{time.strftime('%Y-%m-%d %H-%M-%S')}.csv", index=False)
+    end_time = time.time()
+    print(f"Finished - Time taken: {math.floor((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
 
 
 if __name__ == "__main__":
+    global songs_to_get_stats_for
+    global project_tasks
+    global project_tasks_completed
+    project_tasks_completed = 0
+    project_tasks = 0
+    songs_to_get_stats_for = 0
     # COUNTRY_LIST = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    COUNTRY_LIST = ["SE", "FI", "FR", "DE", "GR", "GT"]
-    PLATFORM_LIST = ["spotify", "apple-music", "shazam"]
-    FILTERS_LIST = ["no_labels"]
-    LABELS_TO_REMOVE = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
+    country_list = ["SE", "FI", "FR", "DE", "GR", "GT"]
+    platform_list = ["spotify", "apple-music", "shazam"]
+    filters_list = ["no_labels"]
+    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
+
     # If it fails to run, try to run it again
-    while True:
-        try:
-            run(COUNTRY_LIST, PLATFORM_LIST, FILTERS_LIST, LABELS_TO_REMOVE, detach=True)
-            break
-        except Exception as e:
-            print(e)
-            print("Failed to complete scrape, trying again")
+    # while True:
+    #     try:
+    #         run(COUNTRY_LIST, PLATFORM_LIST, FILTERS_LIST, LABELS_TO_REMOVE, detach=True)
+    #         break
+    #     except Exception as e:
+    #         print(e)
+    #         print("Failed to complete scrape, trying again")
+    run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach=True, number_of_threads=4, test_mode=False)
