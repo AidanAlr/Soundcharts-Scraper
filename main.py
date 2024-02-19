@@ -333,7 +333,7 @@ def get_streams(link, driver):
         while not streams and attempts < 4:
             attempts += 1
             driver.get(link)
-            time.sleep(2)
+            time.sleep(3)
 
             # Find the parent element and move to it
             tooltip_size = locate_and_move_to_spotify_chart(driver)
@@ -357,6 +357,34 @@ def get_streams(link, driver):
     except Exception as e:
         print("Could not get streams for:" + link)
         return "Error"
+
+
+def get_followers(artist, driver):
+    if "•" in artist:
+        artist = artist.split("•")[0]
+
+    artist = artist.strip().replace(" ", "-").lower()
+    link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
+    followers = []
+    attempts = 0
+    while not followers and attempts < 3:
+        try:
+            attempts += 1
+            driver.get(link)
+            time.sleep(5)
+            followers = WebDriverWait(driver, 5).until(
+                lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
+            followers = [div.text for div in followers]
+        except Exception as e:
+            print("Could not get followers for:" + artist)
+            pass
+
+    if not followers:
+        return "Error"
+    spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
+    spotify_followers = spotify_followers[0].split("\n")[1]
+    print(spotify_followers)
+    return spotify_followers
 
 
 def run(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
@@ -409,15 +437,17 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
                     pass
 
     df = (pd.concat(results_dict.values(), axis=0))
-    df = df.drop_duplicates(subset="Song", keep="first")
 
     if test_mode:
-        df = df.head(2)
+        df = df.head(5)
 
     global songs_to_get_stats_for
     songs_to_get_stats_for += len(df)
 
     df["Streams"] = df["Link"].apply(get_streams, driver=driver)
+    time.sleep(2)
+
+    print(df)
 
     def parse_streams_into_columns(df):
         # Split the "Streams" column into separate columns for each date
@@ -427,9 +457,9 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
         # Extract column names from first row
         streams_df.columns = streams_df.iloc[0].str.split(" - ", expand=True)[0]
         # Remove the dates from cells
-        streams_df = streams_df.applymap(lambda x: x.split(" - ")[-1] if x else x)
+        streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
         # Change to int if x is a number
-        streams_df = streams_df.applymap(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
+        streams_df = streams_df.map(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
         streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
         temp_3_day = (streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100
         temp_7_day = (streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
@@ -443,11 +473,21 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
 
         for column in new_df.columns:
             new_df[column] = new_df[column].apply(lambda x: round(x, 2) if isinstance(x, float) else x)
+
         return new_df
+
+    df["Followers"] = df["Artists"].apply(get_followers, driver=driver)
 
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
-    completed = True
+    print(df)
+
+    # Drop rows with Yesterday less than 2000
+    df = df[df["Yesterday"] > 2000]
+    # Sort df by song
+    df = df.sort_values(by="Song")
+    df.to_csv("saved_here_2.csv", index=False)
+    print(df)
     return df
 
 
@@ -474,7 +514,11 @@ def run_with_threading(country_list, platform_list, filters_list, labels_to_remo
 
     result_dfs = [t.join() for t in threads]
 
+    for df in result_dfs:
+        print(df)
+
     pd.concat(result_dfs, axis=0).to_csv(f"soundcharts_{time.strftime('%Y-%m-%d %H-%M-%S')}.csv", index=False)
+
     end_time = time.time()
     print(f"Finished - Time taken: {math.floor((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
 
@@ -490,17 +534,11 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["SE", "FI", "FR", "DE", "GR", "GT"]
+    country_list = ["SE", "GB", "DE"]
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
-    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy"]
+    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
+                                                                                                                                     "Def Jam",
+                        "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music", "Warner Music", ]
 
-    # If it fails to run, try to run it again
-    # while True:
-    #     try:
-    #         run(COUNTRY_LIST, PLATFORM_LIST, FILTERS_LIST, LABELS_TO_REMOVE, detach=True)
-    #         break
-    #     except Exception as e:
-    #         print(e)
-    #         print("Failed to complete scrape, trying again")
-    run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach=True, number_of_threads=4, test_mode=False)
+    run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=4, test_mode=True)
