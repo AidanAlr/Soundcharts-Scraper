@@ -100,11 +100,11 @@ def sort_by_doc(driver):
 
 
 class Link:
-    def __init__(self, chart_type, country, platform, filters=None):
+    def __init__(self, chart_type, country, platform, filters=None, custom_url=None):
         charts = {
             "spotify": "",
             "apple-music": "top-100-global",
-            "shazam": "shazam-top-200-world"
+            "shazam": "shazam-top-200-world",
         }
         self.filters_dict = {
             # "no_labels": "eyJmbHQiOiJTZWxmIHJlbGVhc2VkfFVua25vd24ifQ%3D%3D",
@@ -123,6 +123,9 @@ class Link:
         if self.filters:
             self.link += f"&filters={self.filters}"
         self.link += f"&platform={self.platform}"
+
+        if custom_url:
+            self.link = custom_url
 
 
 def remove_substring_from_string(substring, string):
@@ -376,7 +379,7 @@ def get_followers(artist, driver):
                 lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
             print(f"Got followers for {artist}")
         except Exception as e:
-            print("Could not get followers for:" + artist + "retrying...")
+            print("Could not get followers for:" + artist + " retrying...")
             if not followers and attempts == 3:
                 return "Error"
 
@@ -404,36 +407,56 @@ def parse_streams_into_columns(df):
     streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
     streams_df = streams_df.map(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
     streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
-    streams_df.drop(streams_df.columns[0], axis=1, inplace=True)
 
     streams_df.to_csv("streams2.csv")
 
     last_day = streams_df[streams_df.columns[-1]]
-    print(last_day)
     last_3_days_avg = streams_df[streams_df.columns[-3:-1]].mean(axis=1)
     # if the value in the last day is nan  use last 3 days average
-    print(last_3_days_avg)
     last_day = last_day.combine_first(last_3_days_avg)
-    print(last_day)
 
-    temp_3_day = ((last_day - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100)
-    temp_7_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
-    temp_14_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
+    temp_3_day = ((last_day - streams_df[streams_df.columns[-4]]) / streams_df[streams_df.columns[-4]] * 100)
+    temp_5_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
+    temp_10_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
 
     new_df = pd.DataFrame()
     new_df["Yesterday"] = streams_df[streams_df.columns[-1]]
     new_df["3_day_avg"] = last_3_days_avg
     new_df["3_day_%_change"] = temp_3_day
-    new_df["7_day_%_change"] = temp_7_day
-    new_df["14_day_%_change"] = temp_14_day
+    new_df["5_day_%_change"] = temp_5_day
+    new_df["10_day_%_change"] = temp_10_day
 
     for column in new_df.columns:
-        new_df[column] = new_df[column].apply(lambda x: round(x) if isinstance(x, float) else x)
+        # round if the value is a float and not infinite
+        new_df[column] = new_df[column].apply(lambda x: round(x, 2) if x and not math.isinf(x) else x)
 
     return new_df
 
 
-def run(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
+def reverse_streams_column(df):
+    streams = df["Streams"]
+    streams = streams.str.split("\n")
+    streams = [stream[::-1] for stream in streams]
+    streams = ["\n".join(stream) for stream in streams]
+    streams = [stream.replace("\n - \n", "") for stream in streams]
+    df["Streams"] = streams
+    return df
+
+
+def print_progress(task_start_time, task_end_time, count, project_tasks_completed):
+    # Print the progress
+    time_per_request = task_end_time - task_start_time
+    total_task_time = time_per_request * project_tasks - project_tasks_completed
+    time_remaining = total_task_time - (time_per_request * count)
+
+    project_tasks_completed += 1
+    print(
+        f"Task {project_tasks_completed}/{project_tasks} completed - Time taken: "
+        f"{math.floor(time_per_request / 60)}m:{round(time_per_request % 60)}s "
+        f"- Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
+
+
+def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
     global project_tasks_completed
     global project_tasks
 
@@ -456,7 +479,6 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
                     # Create the link
                     page = Link("song", country, platform, filters)
                     # Parse the webpage
-
                     df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
                     # Add the country and platform to the dataframe
                     df["Country"] = country
@@ -467,20 +489,62 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
                     # End the timer
                     task_end_time = time.time()
                     count += 1
+                    print_progress(task_start_time, task_end_time, count, project_tasks_completed)
 
-                    # Print the progress
-                    time_per_request = task_end_time - task_start_time
-                    total_task_time = time_per_request * project_tasks - project_tasks_completed
-                    time_remaining = total_task_time - (time_per_request * count)
-
-                    project_tasks_completed += 1
-                    print(
-                        f"Task {project_tasks_completed}/{project_tasks} completed - Time taken: "
-                        f"{math.floor(time_per_request / 60)}m:{round(time_per_request % 60)}s "
-                        f"- Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
                 except Exception as e:
                     print(e)
                     pass
+    ####
+    # Extra tasks to get genre specific data from apple music
+    # US, UK, Canada, Estonia, Ukraine, Lithuania, Latvia, Austria, Kazakhstan, Bulgaria, Hungary, Czechia
+    alternative_chart_dict = {
+        "US": "152",
+        "UK": "153",
+        "CA": "101",
+        "EE": "108",
+        "UA": "259",
+        "LT": "124",
+        "LV": "123",
+        "AT": "92",
+        "KZ": "272",
+        "BG": "99",
+        "HU": "118",
+        "CZ": "105"
+    }
+    dance_chart_dict = {
+        "US": "129",
+        "UK": "128",
+        "CA": "94",
+        "EE": "99",
+        "UA": "485",
+        "LT": "111",
+        "LV": "109",
+        "AT": "90",
+        "KZ": "517",
+        "BG": "93",
+        "HU": "104",
+        "CZ": "96"
+    }
+
+    for country in extra_country_list:
+        alternative_link = (
+            f"https://app.soundcharts.com/app/market/charts?chart=alternative-{alternative_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music")
+        dance_link = f"https://app.soundcharts.com/app/market/charts?chart=dance-{dance_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music"
+        try:
+            df = parse_webpage(driver, alternative_link, labels_to_remove, test_mode)
+            # Add the country and platform to the dataframe
+            df["Country"] = country
+            df["Platform"] = "apple-music"
+            df["Genre"] = "Alternative"
+            results_dict[f"{country}_{alternative_link}"] = df
+            df = parse_webpage(driver, dance_link, labels_to_remove, test_mode)
+            df["Country"] = country
+            df["Platform"] = "apple-music"
+            df["Genre"] = "Dance"
+            results_dict[f"{country}_{dance_link}"] = df
+        except Exception as e:
+            print(e)
+            pass
 
     df = (pd.concat(results_dict.values(), axis=0))
 
@@ -498,10 +562,11 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
     result_df["Followers"] = result_df['Followers'].apply(pd.to_numeric, errors='coerce')
     result_df = result_df[result_df["Followers"] < 50000]
     result_df = result_df[result_df["3_day_avg"] > 2000]
+    result_df = reverse_streams_column(result_df)
     result_dfs_to_concat.append(result_df)
 
 
-def run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
+def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
     start_time = time.time()
 
     number_of_threads = number_of_threads
@@ -513,20 +578,26 @@ def run_with_threading(country_list, platform_list, filters_list, labels_to_remo
     tasks_per_thread = len(country_list) // number_of_threads
     extra_tasks = len(country_list) % number_of_threads
 
+    tasks_from_extra_country_list_per_thread = len(extra_country_list) // number_of_threads
+    extra_tasks_from_extra_country_list = len(extra_country_list) % number_of_threads
     start = 0
     for i in range(number_of_threads):
         end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
-        t = Thread(target=run, args=(country_list[start:end], platform_list, filters_list,
+        end_extra = start + tasks_from_extra_country_list_per_thread + (1 if i < extra_tasks_from_extra_country_list else 0)
+        t = Thread(target=run, args=(country_list[start:end], extra_country_list[start:end_extra], platform_list, filters_list,
                                      labels_to_remove, detach, number_of_threads, test_mode))
         t.start()
         threads.append(t)
         start = end
+        start = end_extra
 
     for t in threads:
         t.join()
 
     end_time = time.time()
-    pd.concat(result_dfs_to_concat, axis=0).to_csv(f'Soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv', index=False)
+    final_df = (pd.concat(result_dfs_to_concat, axis=0))
+    final_df.sort_values(by="Song", inplace=True)
+    final_df.to_csv(f'Soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv', index=False)
     print(f"Finished - Time taken: {math.floor((end_time - start_time) / 60)}m:{round((end_time - start_time) % 60)}s")
 
 
@@ -539,15 +610,20 @@ if __name__ == "__main__":
     project_tasks_completed = 0
     project_tasks = 0
     songs_to_get_stats_for = 0
+
+    # Turn off warnings
+    pd.options.mode.chained_assignment = None
     # COUNTRY_LIST = ["GLOBAL", "AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["SE", "GB", ]
+    country_list = ["SE", "GB"]
+    extra_country_list = ['US', 'UK', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
                                                                                                                                      "Def Jam",
                         "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music", "Warner Music", ]
 
-    run_with_threading(country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=1, test_mode=True)
+    run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=3,
+                       test_mode=False)
