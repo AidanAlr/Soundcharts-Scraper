@@ -383,8 +383,43 @@ def get_followers(artist, driver):
         return "Error"
     spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
     spotify_followers = spotify_followers[0].split("\n")[1]
-    print(spotify_followers)
     return spotify_followers
+
+
+def parse_streams_into_columns(df):
+    # Split the "Streams" column into separate columns for each date
+    streams_df = df["Streams"].str.split("\n", expand=True)
+    streams_df = pd.DataFrame(streams_df)
+    streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+    # Extract column names from first row
+    streams_df.columns = streams_df.iloc[1].str.split(" - ", expand=True)[0]
+    streams_df.to_csv("saved_here_2.csv", index=False)
+
+    # Remove the dates from cells
+    streams_df = streams_df.applymap(lambda x: x.split(" - ")[-1] if x else x)
+    streams_df = streams_df.applymap(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
+    streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
+    streams_df.to_csv("saved_here_3.csv", index=False)
+    last_day = streams_df[streams_df.columns[-1]]
+
+    last_3_days_avg = streams_df[streams_df.columns[-3:]].mean(axis=1)
+    # if the value in the last day is nan  use last 3 days average
+    last_day = last_day.combine_first(last_3_days_avg)
+    temp_3_day = ((last_day - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100)
+    temp_7_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
+    temp_14_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
+    new_df = pd.DataFrame()
+    new_df["Yesterday"] = streams_df[streams_df.columns[-1]]
+    new_df["3_day_avg"] = last_3_days_avg
+    new_df["3_day_%_change"] = temp_3_day
+    new_df["7_day_%_change"] = temp_7_day
+    new_df["14_day_%_change"] = temp_14_day
+    new_df.to_csv("saved_here_4.csv", index=False)
+
+    for column in new_df.columns:
+        new_df[column] = new_df[column].apply(lambda x: round(x, 2) if isinstance(x, float) else x)
+
+    return new_df
 
 
 def run(country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
@@ -447,47 +482,22 @@ def run(country_list, platform_list, filters_list, labels_to_remove, detach, num
     df["Streams"] = df["Link"].apply(get_streams, driver=driver)
     time.sleep(2)
 
-    print(df)
-
-    def parse_streams_into_columns(df):
-        # Split the "Streams" column into separate columns for each date
-        streams_df = df["Streams"].str.split("\n", expand=True)
-        streams_df = pd.DataFrame(streams_df)
-        streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
-        # Extract column names from first row
-        streams_df.columns = streams_df.iloc[0].str.split(" - ", expand=True)[0]
-        # Remove the dates from cells
-        streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
-        # Change to int if x is a number
-        streams_df = streams_df.map(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
-        streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
-        temp_3_day = (streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100
-        temp_7_day = (streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
-        temp_14_day = ((streams_df[streams_df.columns[-1]] - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100)
-
-        new_df = pd.DataFrame()
-        new_df["Yesterday"] = streams_df[streams_df.columns[-1]]
-        new_df["3_day_%_change"] = temp_3_day
-        new_df["7_day_%_change"] = temp_7_day
-        new_df["14_day_%_change"] = temp_14_day
-
-        for column in new_df.columns:
-            new_df[column] = new_df[column].apply(lambda x: round(x, 2) if isinstance(x, float) else x)
-
-        return new_df
-
     df["Followers"] = df["Artists"].apply(get_followers, driver=driver)
 
-    df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
-
+    print("df after followers")
     print(df)
+    print("streams df")
+    print(parse_streams_into_columns(df))
+    df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
+    print(2)
+    # Display last 4 columns
+    print(df[df.columns[-4:]])
 
     # Drop rows with Yesterday less than 2000
     df = df[df["Yesterday"] > 2000]
     # Sort df by song
     df = df.sort_values(by="Song")
     df.to_csv("saved_here_2.csv", index=False)
-    print(df)
     return df
 
 
