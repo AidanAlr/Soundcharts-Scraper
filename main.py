@@ -368,20 +368,17 @@ def get_followers(artist, driver):
 
     artist = artist.strip().replace(" ", "-").lower()
     link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
-    followers = []
     attempts = 0
-    while not followers and attempts < 2:
-        try:
-            attempts += 1
-            driver.get(link)
-            time.sleep(5)
-            followers = WebDriverWait(driver, 5).until(
-                lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
-            print(f"Got followers for {artist}")
-        except Exception as e:
-            print("Could not get followers for:" + artist + " retrying...")
-            if not followers and attempts == 3:
-                return "Error"
+    try:
+        attempts += 1
+        driver.get(link)
+        time.sleep(5)
+        followers = WebDriverWait(driver, 5).until(
+            lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
+        print(f"Got followers for {artist}")
+    except Exception as e:
+        print("Could not get followers for:" + artist)
+        return "Error"
 
     followers = [div.text for div in followers]
     spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
@@ -398,7 +395,6 @@ def parse_streams_into_columns(df):
     streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
     if len(streams_df[streams_df.columns[-1]].iloc[0]) < 5:
         streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
-    streams_df.to_csv("streams.csv")
 
     # Extract column names from first row
     streams_df.columns = streams_df.iloc[1].str.split(" - ", expand=True)[0]
@@ -413,7 +409,7 @@ def parse_streams_into_columns(df):
     last_day = streams_df[streams_df.columns[-1]]
     last_3_days_avg = streams_df[streams_df.columns[-3:-1]].mean(axis=1)
     # if the value in the last day is nan  use last 3 days average
-    last_day = last_day.combine_first(last_3_days_avg)
+    # last_day = last_day.combine_first(last_3_days_avg)
 
     temp_3_day = ((last_day - streams_df[streams_df.columns[-4]]) / streams_df[streams_df.columns[-4]] * 100)
     temp_5_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
@@ -457,9 +453,6 @@ def print_progress(task_start_time, task_end_time, count, project_tasks_complete
 
 
 def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
-    global project_tasks_completed
-    global project_tasks
-
     driver = start_driver_and_login(detach=detach)
 
     results_dict = {}
@@ -467,6 +460,8 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     estimate_runtime(country_list, platform_list, filters_list)
 
     total_tasks = len(country_list) * len(platform_list) * len(filters_list)
+
+    global project_tasks
     project_tasks += total_tasks
 
     count = 0
@@ -489,6 +484,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                     # End the timer
                     task_end_time = time.time()
                     count += 1
+                    global project_tasks_completed
                     print_progress(task_start_time, task_end_time, count, project_tasks_completed)
 
                 except Exception as e:
@@ -499,7 +495,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     # US, UK, Canada, Estonia, Ukraine, Lithuania, Latvia, Austria, Kazakhstan, Bulgaria, Hungary, Czechia
     alternative_chart_dict = {
         "US": "152",
-        "UK": "153",
+        "GB": "153",
         "CA": "101",
         "EE": "108",
         "UA": "259",
@@ -513,7 +509,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     }
     dance_chart_dict = {
         "US": "129",
-        "UK": "128",
+        "GB": "128",
         "CA": "94",
         "EE": "99",
         "UA": "485",
@@ -617,8 +613,10 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["SE", "GB"]
-    extra_country_list = ['US', 'UK', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
+    country_list = ["SE", "GB", "AU"]
+    extra_country_list = ['US', 'GB', 'CA', ]
+
+    # extra_country_list = ['US', 'UK', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
