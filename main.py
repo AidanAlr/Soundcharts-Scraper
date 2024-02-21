@@ -558,6 +558,8 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     result_df["Followers"] = result_df['Followers'].apply(pd.to_numeric, errors='coerce')
     result_df = result_df[result_df["Followers"] < 50000]
     result_df = result_df[result_df["3_day_avg"] > 2000]
+    result_df = result_df[result_df["3_day_avg"] < 10000000]
+
     result_df = reverse_streams_column(result_df)
     result_dfs_to_concat.append(result_df)
 
@@ -613,10 +615,10 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["SE", "GB", "AU"]
+    country_list = ["SE", "GB", "AU", "NL", "NZ", "NI", "NO", "NG", ]
     extra_country_list = ['US', 'GB', 'CA', ]
 
-    # extra_country_list = ['US', 'UK', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
+    extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
