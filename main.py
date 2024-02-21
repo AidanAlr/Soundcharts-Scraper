@@ -14,6 +14,7 @@ from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 global total_tasks, tasks_completed, time_remaining, task_time, task_time_list
+pd.set_option('display.max_columns', 500)
 
 total_tasks = 0
 tasks_completed = 0
@@ -29,13 +30,12 @@ def convert_seconds_to_time_str(seconds):
 
 
 def task_update(func):
-    global task_time
-    task_time = statistics.mean(task_time_list)
-
     # Account for args and kwargs
     def wrapper(*args, **kwargs):
         global total_tasks, time_remaining, tasks_completed, task_time_list, task_time
-        time_remaining += task_time
+        task_time = statistics.mean(task_time_list)
+        total_tasks += 1
+        time_remaining = (total_tasks - tasks_completed) * task_time
         print(f"Starting {func.__name__}. {tasks_completed}/{total_tasks} completed. Time remaining: {convert_seconds_to_time_str(time_remaining)}")
         start = time.time()
         result = func(*args, **kwargs)
@@ -45,7 +45,6 @@ def task_update(func):
         if len(task_time_list) > 10:
             task_time_list.pop(0)
 
-        time_remaining -= task_time
         tasks_completed += 1
         return result
 
@@ -283,7 +282,7 @@ def parse_webpage(driver, url, labels_to_remove, test_mode=False) -> pd.DataFram
 
     result_df = pd.concat(result, axis=0)
     result_df = result_df.drop_duplicates(subset="Song", keep="first")
-    result_df = result_df[result_df["DOC"].astype(int) < 12]
+    result_df = result_df[result_df["DOC"].astype(int) < 100]
     print("\n" + "Successfully parsed webpage")
     return result_df
 
@@ -388,7 +387,8 @@ def get_streams(link, driver):
                 child_elements = [element.text for element in child_elements][0].split("\n")
                 date, daily_streams = child_elements[0], child_elements[-1]
                 daily_streams = daily_streams.split(" ")[-1]
-                streams += f"{date} - {daily_streams}\n"
+                if daily_streams != "0":
+                    streams += f"{date} - {daily_streams}\n"
 
         return streams
 
@@ -429,7 +429,7 @@ def get_total_streams(link, driver):
                     total_streams = 0
                 streams.append(total_streams)
 
-        return streams[-1]
+        return streams[-1] if streams[-1] > 0 else streams[-2]
 
     except Exception as e:
         print("Could not get streams for:" + link)
@@ -478,43 +478,69 @@ def get_spotify_followers_and_total_fans(artist, driver):
 
 
 def parse_streams_into_columns(df):
-    # Split the "Streams" column into separate columns for each date
-    streams_df = df["Streams"].str.split("\n", expand=True)
-    streams_df = pd.DataFrame(streams_df)
-    streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
-    if len(streams_df[streams_df.columns[-1]].iloc[0]) < 5:
+    try:
+        df.to_csv(f"streams1.csv")
+        if df.empty:
+            return None
+        # Split the "Streams" column into separate columns for each date
+        streams_df = df["Streams"].str.split("\n", expand=True)
+        streams_df = pd.DataFrame(streams_df)
         streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+        streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+        streams_df.to_csv(f"streams2.csv")
 
-    # Extract column names from first row
-    streams_df.columns = streams_df.iloc[1].str.split(" - ", expand=True)[0]
+        # Extract column names from first row with all the dates
+        # Find a full row with dates
+        for i in range(len(streams_df)):
+            if streams_df.iloc[i].str.contains(" - ").all():
+                date_df = streams_df.iloc[i:]
+                break
 
-    # Remove the dates from cells
-    streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
-    streams_df = streams_df.map(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
-    streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
+        # Set the first row as the column names
+        streams_df.columns = date_df.iloc[0].str.split(" - ", expand=True)[0]
 
-    # Calculate the 3 day average and the percentage change
-    last_day = streams_df[streams_df.columns[-1]]
-    last_3_days_avg = streams_df[streams_df.columns[-3:-1]].mean(axis=1)
-    # if the value in the last day is nan  use last 3 days average
-    # last_day = last_day.combine_first(last_3_days_avg)
+        # Drop last column
+        streams_df = streams_df.drop(streams_df.columns[-1], axis=1)
 
-    temp_3_day = ((last_day - streams_df[streams_df.columns[-4]]) / streams_df[streams_df.columns[-4]] * 100)
-    temp_5_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
-    temp_10_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
+        # Remove the dates from cells
+        streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
+        streams_df = streams_df.map(lambda x: x.replace(",", "") if x and x.replace(",", "").isdigit() else x)
+        streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
+        print("Streams df")
+        print(streams_df.head())
 
-    new_df = pd.DataFrame()
-    new_df["Yesterday"] = last_day
-    new_df["3_day_avg"] = last_3_days_avg
-    new_df["3_day_%_change"] = temp_3_day
-    new_df["5_day_%_change"] = temp_5_day
-    new_df["10_day_%_change"] = temp_10_day
+        last_day = streams_df[streams_df.columns[-1]]
 
-    for column in new_df.columns:
-        # round if the value is a float and not infinite
-        new_df[column] = new_df[column].apply(lambda x: round(x, 2) if x and not math.isinf(x) else x)
+        last_3_days_avg = streams_df[streams_df.columns[-3:]].mean(axis=1)
 
-    return new_df
+        temp_3_day = ((last_day - streams_df[streams_df.columns[-4]]) / streams_df[streams_df.columns[-4]] * 100)
+        temp_5_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
+        temp_10_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
+
+        new_df = pd.DataFrame()
+        new_df["Yesterday"] = last_day
+        new_df["3_day_avg"] = last_3_days_avg
+        new_df["3_day_%_change"] = temp_3_day
+        new_df["5_day_%_change"] = temp_5_day
+        new_df["10_day_%_change"] = temp_10_day
+
+        for column in new_df.columns:
+            # round if the value is a float and not infinite
+            new_df[column] = new_df[column].apply(lambda x: round(x, 2) if x and not math.isinf(x) else x)
+
+        return new_df
+    except Exception as e:
+        print("Could not parse streams into columns")
+        print(e)
+
+        return pd.DataFrame()
+
+
+#
+# driver = start_driver_and_login(detach=False)
+# link = 'https://app.soundcharts.com/app/song/58059129-fe89-43bb-818a-986733f96e76/overview'
+# df = pd.DataFrame({"Streams": get_streams(link, driver=driver)}, index=[0])
+# parse_streams_into_columns(df)
 
 
 def reverse_streams_column(df):
@@ -527,37 +553,7 @@ def reverse_streams_column(df):
     return df
 
 
-def apply_follower_3day_filter(df):
-    df = df[df["Followers"] < 50000]
-    df = df[df["3_day_avg"] > 2000]
-    return df
-
-
-def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
-    driver = start_driver_and_login(detach=detach)
-
-    results_dict = {}
-    global total_tasks
-    total_tasks += len(country_list) * len(extra_country_list) * len(platform_list) * 4
-
-    for country in country_list:
-        for platform in platform_list:
-            for filters in filters_list:
-                try:
-                    # Create the link
-                    page = Link("song", country, platform, filters)
-                    # Parse the webpage
-                    df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
-                    # Add the country and platform to the dataframe
-                    df["Country"] = country
-                    df["Platform"] = platform
-                    # Add the dataframe to the dictionary
-                    results_dict[f"{page.country}_{page.platform}"] = df
-
-                except Exception as e:
-                    print(e)
-                    pass
-
+def get_extra_song_chart_data(driver, results_dict, test_mode):
     ####
     # Extra tasks to get genre specific data from apple music
     # US, UK, Canada, Estonia, Ukraine, Lithuania, Latvia, Austria, Kazakhstan, Bulgaria, Hungary, Czechia
@@ -610,17 +606,36 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
             print(e)
             pass
 
+
+def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
+    driver = start_driver_and_login(detach=detach)
+
+    results_dict = {}
+
+    for country in country_list:
+        for platform in platform_list:
+            for filters in filters_list:
+                try:
+                    # Create the link
+                    page = Link("song", country, platform, filters)
+                    # Parse the webpage
+                    df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
+                    # Add the country and platform to the dataframe
+                    df["Country"] = country
+                    df["Platform"] = platform
+                    # Add the dataframe to the dictionary
+                    results_dict[f"{page.country}_{page.platform}"] = df
+
+                except Exception as e:
+                    print(e)
+                    pass
+
+    get_extra_song_chart_data(driver, results_dict, test_mode)
+
     df = (pd.concat(results_dict.values(), axis=0))
 
     if test_mode:
-        df = df.head(20)
-
-    global songs_to_get_stats_for
-    songs_to_get_stats_for += len(df)
-
-    # Get the streams for each song
-    df["Streams"] = df["Link"].apply(get_streams, driver=driver)
-    time.sleep(2)
+        df = df.head(10)
 
     # Create a dictionary with the artist names and their followers
     follower_dict = {}
@@ -640,24 +655,39 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     df = df[df["Total_Fans"] < 1_000_000]
 
     # Concat the streams columns with the original dataframe
-    result_df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
+    if not df.empty:
+        result_df = df
+        # Convert the followers column to numeric
+        result_df["Followers"] = result_df["Followers"].apply(lambda x: x.replace(",", "") if x is str and x.replace(",", "").isdigit() else x)
+        result_df["Followers"] = result_df['Followers'].apply(pd.to_numeric, errors='coerce')
+        # Get the streams for each song
+        result_df["Streams"] = result_df["Link"].apply(get_streams, driver=driver)
 
-    # Convert the followers column to numeric
-    result_df["Followers"] = result_df["Followers"].apply(lambda x: x.replace(",", "") if x is str and x.replace(",", "").isdigit() else x)
-    result_df["Followers"] = result_df['Followers'].apply(pd.to_numeric, errors='coerce')
+        result_df.to_csv(f"result.csv")
+        # Parse the streams into separate columns
+        stream_df = parse_streams_into_columns(result_df)
+        stream_df.to_csv(f"streams.csv")
 
-    # Apply the follower and 3 day filter
-    result_df = apply_follower_3day_filter(result_df)
+        # Concat the streams columns with the original dataframe
+        try:
+            result_df = pd.concat([result_df, stream_df], axis=1)
+            print(result_df)
+            # Apply the follower and 3 day filter
+            # result_df = result_df[result_df["Followers"] > 1000]
+            # result_df = result_df[result_df["3_day_avg"] > 2000]
 
-    # Get the total streams and filter out the songs with more than 1 million streams
-    result_df['Total_Streams'] = result_df['Link'].apply(get_total_streams, driver=driver)
-    print(result_df['Total_Streams'])
-    result_df = result_df[result_df['Total_Streams'] < 1_000_000]
+            # Get the total streams and filter out the songs with more than 1 million streams
+            result_df['Total_Streams'] = result_df['Link'].apply(get_total_streams, driver=driver)
+            # Dont filter null values
+            # result_df = result_df[result_df['Total_Streams'] < 2_000_000]
 
-    # Reverse the streams column
-    result_df = reverse_streams_column(result_df)
+            # Reverse the streams column
+            result_df = reverse_streams_column(result_df)
 
-    result_dfs_to_concat.append(result_df)
+            global result_dfs_to_concat
+            result_dfs_to_concat.append(result_df)
+        except Exception as e:
+            print(e)
 
 
 def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
@@ -678,17 +708,24 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     for i in range(number_of_threads):
         end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
         end_extra = start + tasks_from_extra_country_list_per_thread + (1 if i < extra_tasks_from_extra_country_list else 0)
+
         t = Thread(target=run, args=(country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
                                      labels_to_remove, detach, number_of_threads, test_mode))
         t.start()
         threads.append(t)
+
         start = end
         start_extra = end_extra
 
     for t in threads:
-        t.join()
+        try:
+            t.join()
+        except Exception as e:
+            print(e)
 
     final_df = (pd.concat(result_dfs_to_concat, axis=0))
+    # Make sure song column is string
+    final_df["Song"] = final_df["Song"].astype(str)
     final_df.sort_values(by="Song", inplace=True)
     final_df.to_csv(f'Soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv', index=False)
     print("Saved to csv")
@@ -706,10 +743,10 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["HN", "HK", "HU", "IS", "IN", ]
-    # extra_country_list = ['EE', 'UA', 'LT', ]
+    country_list = ["IE", "IL", "IT", "AT", "BY", "BE", ]
+    extra_country_list = ['EE', 'GB', 'CA', ]
 
-    extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
+    # extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
@@ -717,4 +754,4 @@ if __name__ == "__main__":
                         "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music", "Warner Music", ]
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=3,
-                       test_mode=True)
+                       test_mode=False)
