@@ -1,4 +1,5 @@
 import math
+import statistics
 import time
 from threading import Thread
 
@@ -11,6 +12,44 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
+
+global total_tasks, tasks_completed, time_remaining, task_time, task_time_list
+
+total_tasks = 0
+tasks_completed = 0
+time_remaining = 0
+task_time_list = [20]
+task_time = 0
+
+
+def convert_seconds_to_time_str(seconds):
+    minutes = math.floor(seconds / 60)
+    seconds = math.floor(seconds % 60)
+    return f"{minutes}m:{seconds}s"
+
+
+def task_update(func):
+    global task_time
+    task_time = statistics.mean(task_time_list)
+
+    # Account for args and kwargs
+    def wrapper(*args, **kwargs):
+        global total_tasks, time_remaining, tasks_completed, task_time_list, task_time
+        time_remaining += task_time
+        print(f"Starting {func.__name__}. {tasks_completed}/{total_tasks} completed. Time remaining: {convert_seconds_to_time_str(time_remaining)}")
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        tt = end - start
+        task_time_list.append(tt)
+        if len(task_time_list) > 10:
+            task_time_list.pop(0)
+
+        time_remaining -= task_time
+        tasks_completed += 1
+        return result
+
+    return wrapper
 
 
 def get_variable_name(var):
@@ -224,6 +263,7 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         print("Length of lists are not equal")
 
 
+@task_update
 def parse_webpage(driver, url, labels_to_remove, test_mode=False) -> pd.DataFrame():
     print("Parsing webpage: " + url)
     driver.get(url)
@@ -308,25 +348,9 @@ def remove_songs_with_more_than_x_doc(df, days):
     return df
 
 
-def estimate_runtime(country_list, platform_list, filters_list):
-    time_per_request = 22
-    number_of_requests = len(country_list) * len(platform_list) * len(filters_list)
-    estimated_time = time_per_request * number_of_requests
-    print(f"Number of requests: {number_of_requests}")
-    print(f"Estimated time: {math.floor(estimated_time / 60)}m:{round(estimated_time % 60)}s")
-
-
 def change_to_spotify(link):
     link = link.replace("overview", "trends")
     return link
-
-
-def print_current_songs_time_remaining():
-    global songs_to_get_stats_for
-    songs_to_get_stats_for -= 1
-
-    print(f"{songs_to_get_stats_for} songs remaining. Estimated time: {math.floor(songs_to_get_stats_for * 4 / 60)}m:"
-          f"{round(songs_to_get_stats_for * 4 % 60)}s")
 
 
 def locate_and_move_to_spotify_chart(driver):
@@ -338,9 +362,9 @@ def locate_and_move_to_spotify_chart(driver):
     return tooltip_size
 
 
+@task_update
 def get_streams(link, driver):
     try:
-        print_current_songs_time_remaining()
         streams = ""
         attempts = 0
         link = change_to_spotify(link)
@@ -373,9 +397,9 @@ def get_streams(link, driver):
         return "Error"
 
 
+@task_update
 def get_total_streams(link, driver):
     try:
-        print_current_songs_time_remaining()
         streams = []
         attempts = 0
         link = change_to_spotify(link)
@@ -419,27 +443,38 @@ def parse_artist_if_multiple(artist):
     return artist
 
 
-def get_followers(artist, driver):
+@task_update
+def get_spotify_followers_and_total_fans(artist, driver):
     artist = parse_artist_if_multiple(artist)
     link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
     attempts = 0
+    spotify = 0
+    fans = 0
     try:
         attempts += 1
         driver.get(link)
         time.sleep(5)
         followers = WebDriverWait(driver, 5).until(
             lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
-        print(f"Got followers for {artist}")
+        fans = driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")
     except Exception as e:
         print("Could not get followers for:" + artist)
+        fans = 0
+        spotify = 0
         return "Error"
 
     followers = [div.text for div in followers]
     spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
-    if not spotify_followers:
-        return "Error"
-    spotify_followers = spotify_followers[0].split("\n")[1]
-    return spotify_followers
+
+    if spotify_followers:
+        spotify = spotify_followers[0].split("\n")[1]
+
+    if fans and "Total fans" in fans.text:
+        fans = fans.text.split("\n")[1]
+        fans = fans.replace(",", "")
+
+    # print(f"Spotify followers: {spotify}, Total fans: {fans} - {artist}")
+    return spotify, fans
 
 
 def parse_streams_into_columns(df):
@@ -458,8 +493,7 @@ def parse_streams_into_columns(df):
     streams_df = streams_df.map(lambda x: int(x.replace(",", "")) if x and x.replace(",", "").isdigit() else x)
     streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
 
-    streams_df.to_csv(f"streams2_{str(time.time())}.csv")
-
+    # Calculate the 3 day average and the percentage change
     last_day = streams_df[streams_df.columns[-1]]
     last_3_days_avg = streams_df[streams_df.columns[-3:-1]].mean(axis=1)
     # if the value in the last day is nan  use last 3 days average
@@ -499,25 +533,12 @@ def apply_follower_3day_filter(df):
     return df
 
 
-def print_progress(task_start_time, task_end_time, project_tasks, project_tasks_completed):
-    # Print the progress
-    time_per_request = task_end_time - task_start_time
-    total_task_time = time_per_request * project_tasks - project_tasks_completed
-    time_remaining = total_task_time - (time_per_request * project_tasks_completed)
-
-    project_tasks_completed += 1
-    print(
-        f"Task {project_tasks_completed}/{project_tasks} completed - Time taken: "
-        f"{math.floor(time_per_request / 60)}m:{round(time_per_request % 60)}s "
-        f"- Time remaining: {math.floor(time_remaining / 60)}m:{round(time_remaining % 60)}s")
-
-
 def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
     driver = start_driver_and_login(detach=detach)
 
     results_dict = {}
-
-    estimate_runtime(country_list, platform_list, filters_list)
+    global total_tasks
+    total_tasks += len(country_list) * len(extra_country_list) * len(platform_list) * 4
 
     for country in country_list:
         for platform in platform_list:
@@ -536,6 +557,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                 except Exception as e:
                     print(e)
                     pass
+
     ####
     # Extra tasks to get genre specific data from apple music
     # US, UK, Canada, Estonia, Ukraine, Lithuania, Latvia, Austria, Kazakhstan, Bulgaria, Hungary, Czechia
@@ -589,7 +611,6 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
             pass
 
     df = (pd.concat(results_dict.values(), axis=0))
-    df = df[df["DOC"].astype(int) < 12]
 
     if test_mode:
         df = df.head(20)
@@ -603,13 +624,20 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
 
     # Create a dictionary with the artist names and their followers
     follower_dict = {}
+    fan_dict = {}
     artist_names = df['Artists'].apply(parse_artist_if_multiple)
     for artist in list(artist_names.drop_duplicates()):
-        follower_dict[artist] = get_followers(artist, driver)
+        spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist, driver)
+        follower_dict[artist] = spotify_followers
+        fan_dict[artist] = fans
 
     # Get the follower column from the follower_dict
     df["Main_Artist"] = df["Artists"].apply(parse_artist_if_multiple)
     df["Followers"] = df["Main_Artist"].map(follower_dict)
+    df["Total_Fans"] = df["Main_Artist"].map(fan_dict)
+    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
+
+    df = df[df["Total_Fans"] < 1_000_000]
 
     # Concat the streams columns with the original dataframe
     result_df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
@@ -623,6 +651,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
 
     # Get the total streams and filter out the songs with more than 1 million streams
     result_df['Total_Streams'] = result_df['Link'].apply(get_total_streams, driver=driver)
+    print(result_df['Total_Streams'])
     result_df = result_df[result_df['Total_Streams'] < 1_000_000]
 
     # Reverse the streams column
@@ -632,8 +661,6 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
 
 
 def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
-    task_start_time = time.time()
-
     number_of_threads = number_of_threads
     threads = []
 
@@ -646,26 +673,20 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     tasks_from_extra_country_list_per_thread = len(extra_country_list) // number_of_threads
     extra_tasks_from_extra_country_list = len(extra_country_list) % number_of_threads
 
-    project_tasks = number_of_threads
-    project_tasks_completed = 0
-
     start = 0
+    start_extra = 0
     for i in range(number_of_threads):
         end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
         end_extra = start + tasks_from_extra_country_list_per_thread + (1 if i < extra_tasks_from_extra_country_list else 0)
-        t = Thread(target=run, args=(country_list[start:end], extra_country_list[start:end_extra], platform_list, filters_list,
+        t = Thread(target=run, args=(country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
                                      labels_to_remove, detach, number_of_threads, test_mode))
         t.start()
         threads.append(t)
         start = end
-        start = end_extra
+        start_extra = end_extra
 
     for t in threads:
         t.join()
-        # End the timer
-        task_end_time = time.time()
-        project_tasks_completed += 1
-        print_progress(task_start_time, task_end_time, project_tasks, project_tasks_completed)
 
     final_df = (pd.concat(result_dfs_to_concat, axis=0))
     final_df.sort_values(by="Song", inplace=True)
@@ -685,10 +706,10 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["NL", "NZ", "NI", "FR", "DE", "GR", "GT"]
-    extra_country_list = ['US', 'GB', 'CA', ]
+    country_list = ["HN", "HK", "HU", "IS", "IN", ]
+    # extra_country_list = ['EE', 'UA', 'LT', ]
 
-    # extra_country_list = ['US', 'UK', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
+    extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
