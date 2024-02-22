@@ -386,15 +386,15 @@ def locate_and_move_to_spotify_chart(driver):
 
 @task_update
 def get_streams(link, driver):
-    try:
+    attempts = 0
+    link = change_to_spotify(link)
+    while attempts < 4:
         streams = ""
         total_streams = []
-        attempts = 0
-        link = change_to_spotify(link)
-        while not streams and attempts < 4:
+        try:
             attempts += 1
             driver.get(link)
-            time.sleep(3)
+            time.sleep(5)
 
             # Find the parent element and move to it
             tooltip_size = locate_and_move_to_spotify_chart(driver)
@@ -419,14 +419,13 @@ def get_streams(link, driver):
             if not total_streams:
                 total_streams.append("0")
 
-        print(f"Got streams for: {link}")
-        print(streams)
-        print(total_streams[-1])
-        return streams, total_streams[-1]
+            print(f"Got streams: {streams}/ {total_streams[-1]}")
+            return streams, total_streams[-1]
 
-    except Exception as e:
-        print("Could not get streams for:" + link)
-        return "Error"
+        except Exception as e:
+            print("Could not get streams for:" + link)
+            if attempts == 3:
+                return "Error", "Error"
 
 
 def parse_artist_if_multiple(artist):
@@ -440,29 +439,31 @@ def parse_artist_if_multiple(artist):
 def get_spotify_followers_and_total_fans(artist, driver):
     artist = parse_artist_if_multiple(artist)
     link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
-    spotify = 0
-    fans = 0
+    fans = ""
+    spotify = ""
     try:
         driver.get(link)
         time.sleep(5)
         followers = WebDriverWait(driver, 5).until(
             lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
-        fans = driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")
+        followers = [div.text for div in followers]
+        spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
+
+        if spotify_followers:
+            spotify = spotify_followers[0].split("\n")[1]
+
     except Exception as e:
         print("Could not get followers for:" + artist)
-        fans = 0
-        spotify = 0
-        return "Error"
 
-    followers = [div.text for div in followers]
-    spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
+    try:
+        total_fans = driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")
 
-    if spotify_followers:
-        spotify = spotify_followers[0].split("\n")[1]
-
-    if fans and "Total fans" in fans.text:
-        fans = fans.text.split("\n")[1]
-        fans = fans.replace(",", "")
+        if total_fans and "Total fans" in total_fans.text:
+            total_fans = total_fans.text.split("\n")[1]
+            total_fans = fans.replace(",", "")
+            fans = total_fans
+    except Exception as e:
+        print("Could not get total fans for:" + artist)
 
     # print(f"Spotify followers: {spotify}, Total fans: {fans} - {artist}")
     return spotify, fans
@@ -579,6 +580,7 @@ def get_extra_song_chart_data(driver, extra_country_list, results_dict, test_mod
             df["Platform"] = "apple-music"
             df["Genre"] = "Alternative"
             results_dict[f"{country}_{alternative_link}"] = df
+
             df = parse_webpage(driver, dance_link, labels_to_remove, test_mode)
             df["Country"] = country
             df["Platform"] = "apple-music"
@@ -617,8 +619,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     driver = start_driver_and_login(detach=detach)
 
     results_dict = {}
-    global total_tasks
-    total_tasks += len(country_list) * len(platform_list) * len(filters_list)
+
     for country in country_list:
         for platform in platform_list:
             for filters in filters_list:
@@ -627,6 +628,8 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                     page = Link("song", country, platform, filters)
                     # Parse the webpage
                     df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
+                    if test_mode:
+                        df = df.head(15)
                     # Add the country and platform to the dataframe
                     df["Country"] = country
                     df["Platform"] = platform
@@ -641,40 +644,40 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
 
     df = (pd.concat(results_dict.values(), axis=0))
 
-    if test_mode:
-        df = df.head(15)
-
     # Concat the streams columns with the original dataframe
     result_df = df
 
     # Create a dictionary with the artist names and their followers
     total_streams_dict = {}
     daily_streams_dict = {}
+
     result_df['Link'] = result_df['Link'].apply(change_to_spotify)
-    links = result_df["Link"].drop_duplicates()
+    links = set(list(result_df["Link"]))
+
     for link in list(links):
-        daily_streams, total_streams = get_streams(link, driver)
+        daily_streams, total_streams, *_ = get_streams(link, driver)
         daily_streams_dict[link] = daily_streams
         total_streams_dict[link] = total_streams
 
     result_df["Streams"] = result_df["Link"].map(daily_streams_dict)
     result_df["Total_Streams"] = result_df["Link"].map(total_streams_dict)
 
-    result_df.to_csv(f"result10{time_remaining}.csv")
+    result_df.to_csv(f"result10{time.time()}.csv")
 
     result_df['Total_Streams'] = result_df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
 
     # result_df = result_df[result_df['Total_Streams'] < 2_000_000]
     # Parse the streams into separate columns
     stream_df = parse_streams_into_columns(result_df)
-    stream_df.to_csv(f"streams.csv")
+    stream_df.to_csv(f"streams.csv{time.time()}")
 
     # Concat the streams columns with the original dataframe
     result_df = pd.concat([result_df, stream_df], axis=1)
-    result_df.to_csv(f"result11{time_remaining}.csv")
+    result_df.to_csv(f"result11{time.time()}.csv")
 
     result_df = apply_followers_and_fans(result_df, driver)
     result_df = result_df[result_df["Total_Fans"] < 1_000_000]
+
     # Apply the follower and 3 day filter
     # result_df = result_df[result_df["Followers"] > 1000]
     # result_df = result_df[result_df["3_day_avg"] > 2000]
@@ -683,6 +686,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     result_df = reverse_streams_column(result_df)
 
     global result_dfs_to_concat
+    result_df.to_csv("Result.csv")
     result_dfs_to_concat.append(result_df)
 
 
@@ -734,11 +738,9 @@ if __name__ == "__main__":
     result_dfs_to_concat = []
     songs_to_get_stats_for = 0
 
-    global daily_streams_dict, total_streams_dict, total_tasks, tasks_completed, time_remaining, task_time, task_time_list
+    global total_tasks, tasks_completed, time_remaining, task_time, task_time_list
     pd.set_option('display.max_columns', 500)
 
-    total_streams_dict = {}
-    daily_streams_dict = {}
     total_tasks = 0
     tasks_completed = 0
     time_remaining = 0
@@ -750,8 +752,9 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["AR", "AU", "AT"]
-    extra_country_list = ['CA', 'EE', ]
+    country_list = ["AR", "AU", "AT", "CO", "CR", "CY", "CZ", "DK", "FR", "DE", "GR", "GT", "IE", "IL", "IT", "JP",
+                    "LV", "KZ", ]
+    extra_country_list = ['CA', 'EE', 'LT', ]
 
     # extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
@@ -764,4 +767,4 @@ if __name__ == "__main__":
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
                        number_of_threads=2,
-                       test_mode=True)
+                       test_mode=False)
