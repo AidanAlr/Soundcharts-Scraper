@@ -11,6 +11,46 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+
+def send_email_notification(subject, message):
+    sender_email = 'aidanalrawi@icloud.com'
+    smtp_key = 'H7qhF8DV2ysktrv0'
+    recipient_email = 'aidanalrawi@icloud.com'
+
+    # Setup the email message
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(message, 'plain'))
+
+    # Connect to the SMTP server
+    try:
+        server = smtplib.SMTP('smtp-relay.brevo.com', 587)
+        server.starttls()
+        server.login(sender_email, smtp_key)
+    except Exception as e:
+        print("Failed to connect to SMTP server:", e)
+        return False
+
+    # Send the email
+    try:
+        server.sendmail(sender_email, recipient_email, msg.as_string())
+        print("Email notification sent successfully.")
+        return True
+    except Exception as e:
+        print("Failed to send email:", e)
+        return False
+    finally:
+        server.quit()
 
 
 def convert_seconds_to_time_str(seconds):
@@ -66,9 +106,11 @@ def scroll(driver, scroll_amount):
         return
     try:
         time.sleep(0.5)
-        element = WebDriverWait(driver, 10).until(lambda drvr: drvr.find_element(By.CSS_SELECTOR, "div.sc-gKLXLV.fAiEjs.custom-scrollbar"))
+        element = WebDriverWait(driver, 10).until(
+            lambda drvr: drvr.find_element(By.CSS_SELECTOR, "div.sc-gKLXLV.fAiEjs.custom-scrollbar"))
         if element:
-            driver.execute_script("arguments[0].scrollTop += arguments[0].scrollHeight*0.2*arguments[1]", element, scroll_amount)
+            driver.execute_script("arguments[0].scrollTop += arguments[0].scrollHeight*0.2*arguments[1]", element,
+                                  scroll_amount)
             time.sleep(0.5)
     except Exception as e:
         print("Could not scroll")
@@ -161,10 +203,14 @@ def parse_labels(labels):
 def parse_genre(genre):
     songs_and_genres = [div.text for div in genre]
 
-    genre_list = ["Pop", "Rock", "Hip Hop", "Rap", "R&B", "Soul", "Jazz", "Blues", "Country", "Folk", "Reggae", "Dance", "Electronic",
-                  "Classical", "Metal", "Punk", "Indie", "Alternative", "World", "Latin", "K-Pop", "J-Pop", "Anime", "Soundtrack",
-                  "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno", "Trance", "Dubstep",
-                  "African", "American", "Asian", "European", "Indian", "Middle Eastern", "Oceanian", "Caribbean", "Latin American",
+    genre_list = ["Pop", "Rock", "Hip Hop", "Rap", "R&B", "Soul", "Jazz", "Blues", "Country", "Folk", "Reggae", "Dance",
+                  "Electronic",
+                  "Classical", "Metal", "Punk", "Indie", "Alternative", "World", "Latin", "K-Pop", "J-Pop", "Anime",
+                  "Soundtrack",
+                  "Children's Music", "Electro", "Latin", "Asian", "R&B", "Soul", "Funk", "Disco", "House", "Techno",
+                  "Trance", "Dubstep",
+                  "African", "American", "Asian", "European", "Indian", "Middle Eastern", "Oceanian", "Caribbean",
+                  "Latin American",
                   "Instrumental", "Spirituals", "Spoken", "Sports", "Others", "Unknown", "Mena"]
 
     def remove_before_first_newline(s):
@@ -340,14 +386,15 @@ def locate_and_move_to_spotify_chart(driver):
 
 @task_update
 def get_streams(link, driver):
-    daily_streams_string = ""
-    total_streams_list = []
-    attempts = 0
-    while not daily_streams_string and attempts < 2:
-        try:
+    try:
+        streams = ""
+        total_streams = []
+        attempts = 0
+        link = change_to_spotify(link)
+        while not streams and attempts < 4:
             attempts += 1
             driver.get(link)
-            time.sleep(5)
+            time.sleep(3)
 
             # Find the parent element and move to it
             tooltip_size = locate_and_move_to_spotify_chart(driver)
@@ -356,39 +403,30 @@ def get_streams(link, driver):
             mouse_shifts = 14
             for i in range(mouse_shifts):
                 # Move the mouse horizontally by 20% of the tooltip wrapper size
-                if daily_streams_string:
+                if streams:
                     horizontal_move = tooltip_size['width'] * 0.04
                     ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
 
                 child_elements = driver.find_elements(By.CSS_SELECTOR, "div.sc-laTMn.ktlmrZ")
                 child_elements = [element.text for element in child_elements][0].split("\n")
-                if len(child_elements) == 4:
-                    total_streams = child_elements[-3].split(" ")[-1].replace(',', '')
-                    date, daily_streams = child_elements[0], child_elements[-2].split(" ")[-1].replace(',', '')
-                    daily_streams_string += f"{date} - {daily_streams}\n"
+                date, daily_streams = child_elements[0], child_elements[-1]
+                daily_streams = daily_streams.split(" ")[-1].replace(",", "")
+                streams += f"{date} - {daily_streams}\n"
 
-                elif len(child_elements) == 3:
-                    total_streams = child_elements[-2].split(" ")[-1].replace(',', '')
-                    date, daily_streams = child_elements[0], child_elements[-1].split(" ")[-1].replace(',', '')
-                    daily_streams_string += f"{date} - {daily_streams}\n"
+                if len(child_elements) > 2:
+                    total_streams.append(child_elements[1].split(" ")[-1].replace(",", ""))
 
-                elif len(child_elements) == 2:
-                    date, daily_streams = child_elements[0], child_elements[-1].split(" ")[-1].replace(',', '')
-                    daily_streams_string += f"{date} - {daily_streams}\n"
-                    total_streams = ""
+            if not total_streams:
+                total_streams.append("0")
 
-                else:
-                    date = child_elements[0]
-                    daily_streams_string += f"{date} - \n"
-                    total_streams = ""
+        print(f"Got streams for: {link}")
+        print(streams)
+        print(total_streams[-1])
+        return streams, total_streams[-1]
 
-                total_streams_list.append(total_streams)
-
-            total_streams = total_streams_list[-1] if total_streams_list else ""
-            return daily_streams_string, total_streams
-
-        except Exception as e:
-            print("Could not get streams")
+    except Exception as e:
+        print("Could not get streams for:" + link)
+        return "Error"
 
 
 def parse_artist_if_multiple(artist):
@@ -402,11 +440,9 @@ def parse_artist_if_multiple(artist):
 def get_spotify_followers_and_total_fans(artist, driver):
     artist = parse_artist_if_multiple(artist)
     link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
-    attempts = 0
     spotify = 0
     fans = 0
     try:
-        attempts += 1
         driver.get(link)
         time.sleep(5)
         followers = WebDriverWait(driver, 5).until(
@@ -458,7 +494,8 @@ def parse_streams_into_columns(df):
 
         # Remove the dates from cells
         streams_df = streams_df.map(lambda x: x.split(" - ")[-1] if x else x)
-        streams_df = streams_df.map(lambda x: x.replace(",", "") if isinstance(x, str) and x.replace(",", "").isdigit() else x)
+        streams_df = streams_df.map(
+            lambda x: x.replace(",", "") if isinstance(x, str) and x.replace(",", "").isdigit() else x)
         streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
 
         last_day = streams_df[streams_df.columns[-1]]
@@ -498,7 +535,7 @@ def reverse_streams_column(df):
     return df
 
 
-def get_extra_song_chart_data(driver, results_dict, test_mode):
+def get_extra_song_chart_data(driver, extra_country_list, results_dict, test_mode):
     ####
     # Extra tasks to get genre specific data from apple music
     # US, UK, Canada, Estonia, Ukraine, Lithuania, Latvia, Austria, Kazakhstan, Bulgaria, Hungary, Czechia
@@ -552,7 +589,31 @@ def get_extra_song_chart_data(driver, results_dict, test_mode):
             pass
 
 
-def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
+def apply_followers_and_fans(df, driver):
+    # Create a dictionary with the artist names and their followers
+    follower_dict = {}
+    fan_dict = {}
+    artist_names = df['Artists'].apply(parse_artist_if_multiple)
+    for artist in list(artist_names.drop_duplicates()):
+        spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist, driver)
+        follower_dict[artist] = spotify_followers
+        fan_dict[artist] = fans
+
+    # Get the follower column from the follower_dict
+    df["Main_Artist"] = df["Artists"].apply(parse_artist_if_multiple)
+    df["Followers"] = df["Main_Artist"].map(follower_dict)
+    # Convert the followers column to numeric
+    df["Followers"] = df["Followers"].apply(
+        lambda x: x.replace(",", "") if x is str and x.replace(",", "").isdigit() else x)
+    df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
+    df["Total_Fans"] = df["Main_Artist"].map(fan_dict)
+    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
+
+    return df
+
+
+def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads,
+        test_mode=False):
     driver = start_driver_and_login(detach=detach)
 
     results_dict = {}
@@ -576,32 +637,12 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                     print(e)
                     pass
 
-    get_extra_song_chart_data(driver, results_dict, test_mode)
+    get_extra_song_chart_data(driver, extra_country_list, results_dict, test_mode)
 
     df = (pd.concat(results_dict.values(), axis=0))
 
     if test_mode:
         df = df.head(15)
-
-    # Create a dictionary with the artist names and their followers
-    follower_dict = {}
-    fan_dict = {}
-    artist_names = df['Artists'].apply(parse_artist_if_multiple)
-    for artist in list(artist_names.drop_duplicates()):
-        spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist, driver)
-        follower_dict[artist] = spotify_followers
-        fan_dict[artist] = fans
-
-    # Get the follower column from the follower_dict
-    df["Main_Artist"] = df["Artists"].apply(parse_artist_if_multiple)
-    df["Followers"] = df["Main_Artist"].map(follower_dict)
-    # Convert the followers column to numeric
-    df["Followers"] = df["Followers"].apply(lambda x: x.replace(",", "") if x is str and x.replace(",", "").isdigit() else x)
-    df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
-    df["Total_Fans"] = df["Main_Artist"].map(fan_dict)
-    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
-
-    df = df[df["Total_Fans"] < 1_000_000]
 
     # Concat the streams columns with the original dataframe
     result_df = df
@@ -615,8 +656,6 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
         daily_streams, total_streams = get_streams(link, driver)
         daily_streams_dict[link] = daily_streams
         total_streams_dict[link] = total_streams
-        print(f"Streams: {link} : {daily_streams}")
-        print(f"Total Streams: {link} : {total_streams}")
 
     result_df["Streams"] = result_df["Link"].map(daily_streams_dict)
     result_df["Total_Streams"] = result_df["Link"].map(total_streams_dict)
@@ -626,7 +665,6 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     result_df['Total_Streams'] = result_df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
 
     # result_df = result_df[result_df['Total_Streams'] < 2_000_000]
-
     # Parse the streams into separate columns
     stream_df = parse_streams_into_columns(result_df)
     stream_df.to_csv(f"streams.csv")
@@ -635,6 +673,8 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     result_df = pd.concat([result_df, stream_df], axis=1)
     result_df.to_csv(f"result11{time_remaining}.csv")
 
+    result_df = apply_followers_and_fans(result_df, driver)
+    result_df = result_df[result_df["Total_Fans"] < 1_000_000]
     # Apply the follower and 3 day filter
     # result_df = result_df[result_df["Followers"] > 1000]
     # result_df = result_df[result_df["3_day_avg"] > 2000]
@@ -646,8 +686,8 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     result_dfs_to_concat.append(result_df)
 
 
-def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
-    number_of_threads = number_of_threads
+def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach,
+                       number_of_threads, test_mode):
     threads = []
 
     if len(country_list) < number_of_threads:
@@ -663,10 +703,12 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     start_extra = 0
     for i in range(number_of_threads):
         end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
-        end_extra = start + tasks_from_extra_country_list_per_thread + (1 if i < extra_tasks_from_extra_country_list else 0)
+        end_extra = start + tasks_from_extra_country_list_per_thread + (
+            1 if i < extra_tasks_from_extra_country_list else 0)
 
-        t = Thread(target=run, args=(country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
-                                     labels_to_remove, detach, number_of_threads, test_mode))
+        t = Thread(target=run, args=(
+            country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
+            labels_to_remove, detach, number_of_threads, test_mode))
         t.start()
         threads.append(t)
 
@@ -676,12 +718,14 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     for t in threads:
         t.join()
 
+    global result_dfs_to_concat
     final_df = (pd.concat(result_dfs_to_concat, axis=0))
     # Make sure song column is string
     final_df["Song"] = final_df["Song"].astype(str)
     final_df.sort_values(by="Song", inplace=True)
     final_df.to_csv(f'Soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv', index=False)
     print("Saved to csv")
+    send_email_notification('Project Completion Notification', 'Your project is complete. Please check the results.')
 
 
 if __name__ == "__main__":
@@ -712,9 +756,12 @@ if __name__ == "__main__":
     # extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
-    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music', 'universal music', "yzy", "Island"
-                                                                                                                                     "Def Jam",
-                        "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music", "Warner Music", ]
+    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
+                        'universal music', "yzy", "Island",
+                        "Def Jam",
+                        "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music",
+                        "Warner Music", ]
 
-    run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False, number_of_threads=2,
-                       test_mode=False)
+    run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
+                       number_of_threads=2,
+                       test_mode=True)
