@@ -553,102 +553,97 @@ def get_extra_song_chart_data(driver, results_dict, test_mode):
 
 
 def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode=False):
-    try:
-        driver = start_driver_and_login(detach=detach)
+    driver = start_driver_and_login(detach=detach)
 
-        results_dict = {}
-        global total_tasks
-        total_tasks += len(country_list) * len(platform_list) * len(filters_list)
-        for country in country_list:
-            for platform in platform_list:
-                for filters in filters_list:
-                    try:
-                        # Create the link
-                        page = Link("song", country, platform, filters)
-                        # Parse the webpage
-                        df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
-                        # Add the country and platform to the dataframe
-                        df["Country"] = country
-                        df["Platform"] = platform
-                        # Add the dataframe to the dictionary
-                        results_dict[f"{page.country}_{page.platform}"] = df
+    results_dict = {}
+    global total_tasks
+    total_tasks += len(country_list) * len(platform_list) * len(filters_list)
+    for country in country_list:
+        for platform in platform_list:
+            for filters in filters_list:
+                try:
+                    # Create the link
+                    page = Link("song", country, platform, filters)
+                    # Parse the webpage
+                    df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
+                    # Add the country and platform to the dataframe
+                    df["Country"] = country
+                    df["Platform"] = platform
+                    # Add the dataframe to the dictionary
+                    results_dict[f"{page.country}_{page.platform}"] = df
 
-                    except Exception as e:
-                        print(e)
-                        pass
+                except Exception as e:
+                    print(e)
+                    pass
 
-        get_extra_song_chart_data(driver, results_dict, test_mode)
+    get_extra_song_chart_data(driver, results_dict, test_mode)
 
-        df = (pd.concat(results_dict.values(), axis=0))
+    df = (pd.concat(results_dict.values(), axis=0))
 
-        if test_mode:
-            df = df.head(15)
+    if test_mode:
+        df = df.head(15)
 
-        # Create a dictionary with the artist names and their followers
-        follower_dict = {}
-        fan_dict = {}
-        artist_names = df['Artists'].apply(parse_artist_if_multiple)
-        for artist in list(artist_names.drop_duplicates()):
-            spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist, driver)
-            follower_dict[artist] = spotify_followers
-            fan_dict[artist] = fans
+    # Create a dictionary with the artist names and their followers
+    follower_dict = {}
+    fan_dict = {}
+    artist_names = df['Artists'].apply(parse_artist_if_multiple)
+    for artist in list(artist_names.drop_duplicates()):
+        spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist, driver)
+        follower_dict[artist] = spotify_followers
+        fan_dict[artist] = fans
 
-        # Get the follower column from the follower_dict
-        df["Main_Artist"] = df["Artists"].apply(parse_artist_if_multiple)
-        df["Followers"] = df["Main_Artist"].map(follower_dict)
-        # Convert the followers column to numeric
-        df["Followers"] = df["Followers"].apply(lambda x: x.replace(",", "") if x is str and x.replace(",", "").isdigit() else x)
-        df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
-        df["Total_Fans"] = df["Main_Artist"].map(fan_dict)
-        df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
+    # Get the follower column from the follower_dict
+    df["Main_Artist"] = df["Artists"].apply(parse_artist_if_multiple)
+    df["Followers"] = df["Main_Artist"].map(follower_dict)
+    # Convert the followers column to numeric
+    df["Followers"] = df["Followers"].apply(lambda x: x.replace(",", "") if x is str and x.replace(",", "").isdigit() else x)
+    df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
+    df["Total_Fans"] = df["Main_Artist"].map(fan_dict)
+    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
 
-        df = df[df["Total_Fans"] < 1_000_000]
+    df = df[df["Total_Fans"] < 1_000_000]
 
-        # Concat the streams columns with the original dataframe
-        result_df = df
+    # Concat the streams columns with the original dataframe
+    result_df = df
 
-        # Create a dictionary with the artist names and their followers
-        total_streams_dict = {}
-        daily_streams_dict = {}
-        result_df['Link'] = result_df['Link'].apply(change_to_spotify)
-        links = result_df["Link"]
-        for link in list(links):
-            daily_streams, total_streams, *_ = get_streams(link, driver)
-            daily_streams_dict[link] = daily_streams
-            total_streams_dict[link] = total_streams
-            # print(f"Streams: {link} : {daily_streams}")
-            # print(f"Total Streams: {link} : {total_streams}")
+    # Create a dictionary with the artist names and their followers
+    total_streams_dict = {}
+    daily_streams_dict = {}
+    result_df['Link'] = result_df['Link'].apply(change_to_spotify)
+    links = result_df["Link"].drop_duplicates()
+    for link in list(links):
+        daily_streams, total_streams = get_streams(link, driver)
+        daily_streams_dict[link] = daily_streams
+        total_streams_dict[link] = total_streams
+        print(f"Streams: {link} : {daily_streams}")
+        print(f"Total Streams: {link} : {total_streams}")
 
-        result_df["Streams"] = result_df["Link"].map(daily_streams_dict)
-        result_df["Total_Streams"] = result_df["Link"].map(total_streams_dict)
+    result_df["Streams"] = result_df["Link"].map(daily_streams_dict)
+    result_df["Total_Streams"] = result_df["Link"].map(total_streams_dict)
 
-        result_df.to_csv(f"result10{time_remaining}.csv")
+    result_df.to_csv(f"result10{time_remaining}.csv")
 
-        result_df['Total_Streams'] = result_df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
+    result_df['Total_Streams'] = result_df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
 
-        result_df = result_df[result_df['Total_Streams'] < 2_000_000]
+    # result_df = result_df[result_df['Total_Streams'] < 2_000_000]
 
-        # Parse the streams into separate columns
-        stream_df = parse_streams_into_columns(result_df)
-        stream_df.to_csv(f"streams.csv")
+    # Parse the streams into separate columns
+    stream_df = parse_streams_into_columns(result_df)
+    stream_df.to_csv(f"streams.csv")
 
-        # Concat the streams columns with the original dataframe
-        result_df = pd.concat([result_df, stream_df], axis=1)
-        result_df.to_csv(f"result11{time_remaining}.csv")
+    # Concat the streams columns with the original dataframe
+    result_df = pd.concat([result_df, stream_df], axis=1)
+    result_df.to_csv(f"result11{time_remaining}.csv")
 
-        # Apply the follower and 3 day filter
-        # result_df = result_df[result_df["Followers"] > 1000]
-        # result_df = result_df[result_df["3_day_avg"] > 2000]
+    # Apply the follower and 3 day filter
+    # result_df = result_df[result_df["Followers"] > 1000]
+    # result_df = result_df[result_df["3_day_avg"] > 2000]
 
-        # Reverse the streams column
-        result_df = reverse_streams_column(result_df)
+    # Reverse the streams column
+    result_df = reverse_streams_column(result_df)
 
-        global result_dfs_to_concat
-        result_dfs_to_concat.append(result_df)
-
-    except Exception as e:
-        print(e)
-        pass
+    global result_dfs_to_concat
+    result_dfs_to_concat.append(result_df)
 
 
 def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads, test_mode):
@@ -711,7 +706,7 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["AR", "AU", "AT", "BY", "BE", ]
+    country_list = ["AR", "AU", "AT"]
     extra_country_list = ['CA', 'EE', ]
 
     # extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
