@@ -481,7 +481,7 @@ def parse_streams_into_columns(df):
         streams_df = df["Streams"].str.split("\n", expand=True)
         streams_df = pd.DataFrame(streams_df)
         streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
-        streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
+        # streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
 
         # Extract column names from first row with all the dates
         # Find a full row with dates
@@ -503,15 +503,14 @@ def parse_streams_into_columns(df):
         streams_df = streams_df.apply(pd.to_numeric, errors='coerce')
 
         last_day = streams_df[streams_df.columns[-1]]
-
         last_3_days_avg = streams_df[streams_df.columns[-3:]].mean(axis=1)
 
-        temp_3_day = ((last_day - streams_df[streams_df.columns[-3]]) / streams_df[streams_df.columns[-3]] * 100)
-        temp_5_day = (last_day - streams_df[streams_df.columns[-5]]) / streams_df[streams_df.columns[-5]] * 100
-        temp_10_day = (last_day - streams_df[streams_df.columns[-10]]) / streams_df[streams_df.columns[-10]] * 100
+        temp_3_day = ((last_day - streams_df[streams_df.columns[-4]]) / streams_df[streams_df.columns[-4]] * 100)
+        temp_5_day = (last_day - streams_df[streams_df.columns[-6]]) / streams_df[streams_df.columns[-6]] * 100
+        temp_10_day = (last_day - streams_df[streams_df.columns[-11]]) / streams_df[streams_df.columns[-11]] * 100
 
         new_df = pd.DataFrame()
-        new_df["Yesterday"] = last_day
+        new_df["Yesterday"] = streams_df[streams_df.columns[-2]]
         new_df["3_day_avg"] = last_3_days_avg
         new_df["3_day_%_change"] = temp_3_day
         new_df["5_day_%_change"] = temp_5_day
@@ -618,6 +617,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                     # Add the dataframe to the dictionary
                     results_dict[f"{page.country}_{page.platform}"] = df
                     print(f"Parsed {count}/{tasks} pages")
+                    count += 1
                 except Exception as e:
                     print(e)
 
@@ -629,9 +629,12 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
 
     # Reset the index
     df.reset_index(drop=True, inplace=True)
+    task_time = []
     # # Loop through each row in the df and get the streams/total streams/followers/fans
     for index, row in df.iterrows():
         try:
+            start_time = time.time()
+
             daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
             # Add entire row to the dataframe
             row['Streams'] = daily_streams
@@ -640,10 +643,16 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
             spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Main_Artist"], driver)
             row['Followers'] = spotify_followers
             row['Total_Fans'] = fans
-            # Fill empty cells with "N/A"
-            row = row.fillna("N/A")
-            print(f"Completed getting stats for {row['Song']} by {row['Main_Artist']} {index}/{len(df)}")
             final_df = append_row(final_df, row)
+
+            end_time = time.time()
+
+            task_time.append(end_time - start_time)
+            task_time = task_time[-10:]
+            time_remaining = (sum(task_time) / len(task_time)) * (len(df) - int(index))
+            time_remaining_string = convert_seconds_to_time_str(time_remaining)
+            print(
+                f"Completed getting stats for {row['Song']} by {row['Main_Artist']} {index}/{len(df)} - {time_remaining_string} remaining")
 
         except Exception as e:
             print("Missing data for:")
@@ -708,6 +717,14 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     df["Song"] = df["Song"].astype(str)
     df.sort_values(by="Song", inplace=True)
 
+    desired_order = ['Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Main_Artist', 'Followers',
+                     'Total_Fans', 'Link', 'Song', 'DOC', 'rank', 'Change', 'Total_Streams', 'Streams', 'Yesterday',
+                     '3_day_avg',
+                     '3_day_%_change', '5_day_%_change', '10_day_%_change']
+
+    # Reorder the columns
+    df = df[desired_order]
+
     df.to_csv('soundcharts.csv')
     print("Saved to csv")
 
@@ -726,10 +743,9 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", ]
-    extra_country_list = ['US', 'GB', ]
+    country_list = ["AR", "AU", "AT", ]
 
-    # extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
+    extra_country_list = []
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
@@ -739,8 +755,8 @@ if __name__ == "__main__":
                         "Warner Music", ]
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
-                       number_of_threads=4,
-                       test_mode=False)
+                       number_of_threads=5,
+                       test_mode=True)
 
     send_email_notification('Song Scraping: SUCCESS',
                             'Your program is complete with no issues. Please check the results.')
