@@ -25,7 +25,7 @@ def append_row(df, row):
                      ).reset_index(drop=True)
 
 
-def send_email_notification(subject, message):
+def send_email_notification(recipient, subject, message):
     sender_email = 'aidanalrawi@icloud.com'
     smtp_key = 'H7qhF8DV2ysktrv0'
     recipient_email = 'aidanalrawi@icloud.com'
@@ -652,7 +652,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
             time_remaining = (sum(task_time) / len(task_time)) * (len(df) - int(index))
             time_remaining_string = convert_seconds_to_time_str(time_remaining)
             print(
-                f"Completed getting stats for {row['Song']} by {row['Main_Artist']} {index}/{len(df)} - {time_remaining_string} remaining")
+                f"Got stats for {row['Song']} by {row['Main_Artist']} {index}/{len(df)} - {time_remaining_string} remaining")
 
         except Exception as e:
             print("Missing data for:")
@@ -743,9 +743,10 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
     country_list = ["AR", "AU", "AT", ]
 
-    extra_country_list = []
+    extra_country_list = ["US", "GB", "CA", ]
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
@@ -755,8 +756,13 @@ if __name__ == "__main__":
                         "Warner Music", ]
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
-                       number_of_threads=5,
-                       test_mode=True)
+                       number_of_threads=4,
+                       test_mode=False)
 
-    send_email_notification('Song Scraping: SUCCESS',
+    send_email_notification("aidanalrawi@icloud.com",
+                            'Song Scraping: SUCCESS',
                             'Your program is complete with no issues. Please check the results.')
+
+    # send_email_notification("jhlevy01@gmail.com",
+    #                         'Song Scraping: SUCCESS',
+    #                         'Hopefully u receive this bro.')
