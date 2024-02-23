@@ -182,15 +182,15 @@ class Link:
         self.platform = platform
         self.filters = self.filters_dict[filters] if filters else ""
 
-        self.link = f"https://app.soundcharts.com/app/market/charts?chart={self.chart}&chart_type={self.chart_type}&country={self.country}"
+        self.link_string = f"https://app.soundcharts.com/app/market/charts?chart={self.chart}&chart_type={self.chart_type}&country={self.country}"
         if self.platform == "spotify":
-            self.link += "&period=1"
+            self.link_string += "&period=1"
         if self.filters:
-            self.link += f"&filters={self.filters}"
-        self.link += f"&platform={self.platform}"
+            self.link_string += f"&filters={self.filters}"
+        self.link_string += f"&platform={self.platform}"
 
         if custom_url:
-            self.link = custom_url
+            self.link_string = custom_url
 
 
 def remove_substring_from_string(substring, string):
@@ -233,13 +233,12 @@ def parse_songs(songs_and_genre):
     return songs
 
 
-def take_data_return_df(driver, labels_to_remove) -> pd.DataFrame():
+def take_data_return_df(driver) -> pd.DataFrame():
     """
     This function extracts data from a webpage and returns it as a pandas DataFrame.
 
     Parameters:
     driver (webdriver): The selenium webdriver instance to interact with the webpage.
-    labels_to_remove (list): A list of labels to be removed from the data.
 
     Returns:
     pd.DataFrame: A DataFrame containing the extracted data from the webpage.
@@ -307,14 +306,13 @@ def take_data_return_df(driver, labels_to_remove) -> pd.DataFrame():
         print("Length of lists are not equal")
 
 
-def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
+def parse_webpage(driver, url) -> pd.DataFrame():
     """
     This function parses a webpage and extracts relevant data into a pandas DataFrame.
 
     Parameters:
     driver (webdriver): The selenium webdriver instance to interact with the webpage.
     url (str): The URL of the webpage to parse.
-    labels_to_remove (list): A list of labels to be removed from the data.
 
     Returns:
     pd.DataFrame: A DataFrame containing the parsed data from the webpage.
@@ -333,20 +331,20 @@ def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
     result = []
 
     # Scroll the webpage 5 times to load more data
-    scroll_count = 5
+    scroll_count = 7
     for _ in range(scroll_count):
         # Pause the execution for 0.25 seconds between each scroll
         time.sleep(0.25)
 
         # Scroll the webpage and append the extracted data to the result list
         scroll(driver, 1)
-        result.append(take_data_return_df(driver, labels_to_remove))
+        result.append(take_data_return_df(driver))
 
     # Concatenate all the dataframes in the result list into a single dataframe
     result_df = pd.concat(result, axis=0)
 
     # Remove songs with specified labels and more than 30 days on chart
-    result_df = remove_songs_with_labels_from_df(result_df, labels_to_remove)
+    result_df = remove_songs_with_labels_from_df(result_df)
     # Filter out songs with more than 100 days on chart
     result_df = remove_songs_with_more_than_x_doc(result_df, 100)
     # Filter out songs with more than 1 artist
@@ -389,7 +387,7 @@ def start_driver_and_login(detach=False):
                 print("Successfully logged in")
                 return driver
 
-        except Exception as e:
+        except Exception:
             print("Could not log in, trying again in 5 seconds")
             time.sleep(5)
 
@@ -403,9 +401,14 @@ def output_to_excel_from_dict(excel_dict):
     print(f"Saved to {filename}")
 
 
-def remove_songs_with_labels_from_df(df, labels):
+def remove_songs_with_labels_from_df(df):
+    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
+                        'universal music', "yzy", "Island",
+                        "Def Jam",
+                        "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music",
+                        "Warner Music", ]
     # Remove songs with labels in the list, check with lowercase
-    for label in labels:
+    for label in labels_to_remove:
         df = df[~df["Labels"].str.lower().str.contains(label.lower())]
 
     return df
@@ -442,15 +445,14 @@ def get_streams(link, driver):
             time.sleep(5)
 
             # Find the parent element and move to it
-            tooltip_size = locate_and_move_to_spotify_chart(driver)
+            tooltip = locate_and_move_to_spotify_chart(driver)
 
             # Find the child element which holds the stream data
             mouse_shifts = 14
             for _ in range(mouse_shifts):
                 # Move the mouse horizontally by 20% of the tooltip wrapper size
-                if streams:
-                    horizontal_move = tooltip_size['width'] * 0.04
-                    ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
+                horizontal_move = tooltip['width'] * 0.04
+                ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
 
                 child_elements = driver.find_elements(By.CSS_SELECTOR, "div.sc-laTMn.ktlmrZ")
                 child_elements = [element.text for element in child_elements][0].split("\n")
@@ -614,14 +616,14 @@ def get_extra_song_chart_data(driver, extra_country_list, results_dict):
             f"https://app.soundcharts.com/app/market/charts?chart=alternative-{alternative_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music")
         dance_link = f"https://app.soundcharts.com/app/market/charts?chart=dance-{dance_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music"
         try:
-            df = parse_webpage(driver, alternative_link, labels_to_remove)
+            df = parse_webpage(driver, alternative_link)
             # Add the country and platform to the dataframe
             df["Country"] = country
             df["Platform"] = "apple-music"
             df["Genre"] = "Alternative"
             results_dict[f"{country}_{alternative_link}"] = df
 
-            df = parse_webpage(driver, dance_link, labels_to_remove)
+            df = parse_webpage(driver, dance_link)
             df["Country"] = country
             df["Platform"] = "apple-music"
             df["Genre"] = "Dance"
@@ -631,7 +633,7 @@ def get_extra_song_chart_data(driver, extra_country_list, results_dict):
             print(e)
 
 
-def collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list, labels_to_remove,
+def collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list,
                               results_dict, test_mode) -> None:
     tasks = len(country_list) * len(platform_list) * len(filters_list) + len(extra_country_list) * 2
     count = 0
@@ -642,7 +644,7 @@ def collect_all_genres_charts(driver, country_list, extra_country_list, platform
                     # Create the link
                     page = Link("song", country, platform, filters)
                     # Parse the webpage
-                    df = parse_webpage(driver, page.link, labels_to_remove)
+                    df = parse_webpage(driver, page.link_string)
                     if test_mode:
                         df = df.head(5)
                     # Add the country and platform to the dataframe
@@ -656,7 +658,7 @@ def collect_all_genres_charts(driver, country_list, extra_country_list, platform
                     print(e)
 
 
-def run_thread(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach,
+def run_thread(country_list, extra_country_list, platform_list, filters_list, detach,
                number_of_threads,
                test_mode=False):
     """
@@ -667,7 +669,6 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, la
     extra_country_list (list): A list of additional countries to collect data from.
     platform_list (list): A list of platforms to collect data from.
     filters_list (list): A list of filters to apply during data collection.
-    labels_to_remove (list): A list of labels to remove from the data.
     detach (bool): Whether to detach the webdriver after data collection.
     number_of_threads (int): The number of threads to use for data collection.
     test_mode (bool): Whether to run the function in test mode.
@@ -682,7 +683,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, la
     results_dict = {}
 
     # Collect all genres charts
-    collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list, labels_to_remove,
+    collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list,
                               results_dict, test_mode)
     # Get extra song chart data
     get_extra_song_chart_data(driver, extra_country_list, results_dict)
@@ -724,7 +725,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, la
             print(
                 f"Got stats for {row['Song']} by {row['Artists']} {index}/{len(df)} - {time_remaining_string} remaining")
 
-        except Exception as e:
+        except Exception:
             print("Problem getting data for:")
             print(row)
 
@@ -749,6 +750,7 @@ def apply_final_filters_and_formatting(df):
 
     # Reverse the streams column
     df = reverse_streams_column(df)
+    df['Streams'] = df['Streams'].apply(lambda x: x.lstrip(" - \n"))
 
     df["Song"] = df["Song"].astype(str)
     df.sort_values(by="Song", inplace=True)
@@ -761,10 +763,87 @@ def apply_final_filters_and_formatting(df):
     # Reorder the columns
     df = df[desired_order]
 
+    country_dict = {
+        "AR": "Argentina",
+        "AU": "Australia",
+        "AT": "Austria",
+        "BY": "Belarus",
+        "BE": "Belgium",
+        "BO": "Bolivia",
+        "BR": "Brazil",
+        "BG": "Bulgaria",
+        "CA": "Canada",
+        "CL": "Chile",
+        "CO": "Colombia",
+        "CR": "Costa Rica",
+        "CY": "Cyprus",
+        "CZ": "Czech Republic",
+        "DK": "Denmark",
+        "DO": "Dominican Republic",
+        "EC": "Ecuador",
+        "EG": "Egypt",
+        "SV": "El Salvador",
+        "EE": "Estonia",
+        "FI": "Finland",
+        "FR": "France",
+        "DE": "Germany",
+        "GR": "Greece",
+        "GT": "Guatemala",
+        "HN": "Honduras",
+        "HK": "Hong Kong",
+        "HU": "Hungary",
+        "IS": "Iceland",
+        "IN": "India",
+        "ID": "Indonesia",
+        "IE": "Ireland",
+        "IL": "Israel",
+        "IT": "Italy",
+        "JP": "Japan",
+        "LV": "Latvia",
+        "KZ": "Kazakhstan",
+        "LT": "Lithuania",
+        "LU": "Luxembourg",
+        "MY": "Malaysia",
+        "MX": "Mexico",
+        "MA": "Morocco",
+        "NL": "Netherlands",
+        "NZ": "New Zealand",
+        "NI": "Nicaragua",
+        "NO": "Norway",
+        "NG": "Nigeria",
+        "PK": "Pakistan",
+        "PA": "Panama",
+        "PY": "Paraguay",
+        "PE": "Peru",
+        "PH": "Philippines",
+        "PL": "Poland",
+        "PT": "Portugal",
+        "RO": "Romania",
+        "SG": "Singapore",
+        "SK": "Slovakia",
+        "KR": "South Korea",
+        "ZA": "South Africa",
+        "ES": "Spain",
+        "SE": "Sweden",
+        "CH": "Switzerland",
+        "TW": "Taiwan",
+        "TH": "Thailand",
+        "TR": "Turkey",
+        "UA": "Ukraine",
+        "AE": "United Arab Emirates",
+        "GB": "United Kingdom",
+        "US": "United States",
+        "UY": "Uruguay",
+        "VN": "Vietnam",
+        "VE": "Venezuela"
+    }
+
+    df["Country"] = df["Country"].map(country_dict)
+
     return df
 
 
-def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach,
+def run_with_threading(country_list, extra_country_list, platform_list, filters_list, detach,
                        number_of_threads, test_mode):
     """
     This function runs the data collection process using multiple threads.
@@ -774,34 +853,36 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     extra_country_list (list): A list of additional countries to collect data from.
     platform_list (list): A list of platforms to collect data from.
     filters_list (list): A list of filters to apply during data collection.
-    labels_to_remove (list): A list of labels to remove from the data.
     detach (bool): Whether to detach the webdriver after data collection.
     number_of_threads (int): The number of threads to use for data collection.
     test_mode (bool): Whether to run the function in test mode.
 
     """
-
+    # List to store the threads
     threads = []
 
-    if len(country_list) < number_of_threads:
-        number_of_threads = len(country_list)
+    # If the number of threads is greater than the length of the country list, reduce the number of threads
+    number_of_threads = min(number_of_threads, len(country_list))
 
+    # Calculate the number of tasks per thread
     tasks_per_thread = len(country_list) // number_of_threads
     extra_tasks = len(country_list) % number_of_threads
 
+    # Calculate the number of tasks per thread for the extra country list
     tasks_from_extra_country_list_per_thread = len(extra_country_list) // number_of_threads
     extra_tasks_from_extra_country_list = len(extra_country_list) % number_of_threads
 
     start = 0
     start_extra = 0
+
     for i in range(number_of_threads):
         end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
         end_extra = start + tasks_from_extra_country_list_per_thread + (
             1 if i < extra_tasks_from_extra_country_list else 0)
-
-        t = Thread(target=run_thread, args=(
-            country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
-            labels_to_remove, detach, number_of_threads, test_mode))
+        t = Thread(target=run_thread,
+                   args=(
+                       country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
+                       detach, number_of_threads, test_mode))
         t.start()
         threads.append(t)
 
@@ -843,17 +924,16 @@ if __name__ == "__main__":
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
     # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
 
-    country_list = ["US", "GB", "CA", "EE", ]
+    country_list = ["US", "GB", ]
     extra_country_list = []
 
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
-    labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
-                        'universal music', "yzy", "Island",
-                        "Def Jam",
-                        "Republic", "Interscope", "Atlantic", "Columbia", "Capitol", "RCA", "Epic", "Sony Music",
-                        "Warner Music", ]
 
-    run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
-                       number_of_threads=3,
+    run_with_threading(country_list,
+                       extra_country_list,
+                       platform_list,
+                       filters_list,
+                       detach=False,
+                       number_of_threads=4,
                        test_mode=True)
