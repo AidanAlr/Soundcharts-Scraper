@@ -12,9 +12,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
+import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 
 
 def append_row(df, row):
@@ -26,6 +29,7 @@ def send_email_notification(subject, message):
     sender_email = 'aidanalrawi@icloud.com'
     smtp_key = 'H7qhF8DV2ysktrv0'
     recipient_email = 'aidanalrawi@icloud.com'
+    attachment_path = 'soundcharts.csv'
 
     # Setup the email message
     msg = MIMEMultipart()
@@ -33,6 +37,17 @@ def send_email_notification(subject, message):
     msg['To'] = recipient_email
     msg['Subject'] = subject
     msg.attach(MIMEText(message, 'plain'))
+
+    # Attach the CSV file
+    with open(attachment_path, 'rb') as attachment:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(attachment.read())
+    encoders.encode_base64(part)
+    part.add_header(
+        'Content-Disposition',
+        f'attachment; filename= {os.path.basename(attachment_path)}'
+    )
+    msg.attach(part)
 
     # Connect to the SMTP server
     try:
@@ -411,8 +426,8 @@ def get_streams(link, driver):
 
         except Exception as e:
             print("Could not get streams for:" + link)
-            if attempts == 2:
-                driver = start_driver_and_login()
+            # if attempts == 2:
+            #     driver = start_driver_and_login()
             print(e)
             if attempts == 3:
                 return "Error", "Error"
@@ -506,13 +521,10 @@ def parse_streams_into_columns(df):
             # round if the value is a float and not infinite
             new_df[column] = new_df[column].apply(lambda x: round(x, 2) if x and not math.isinf(x) else x)
 
-        print(new_df)
         return new_df
     except Exception as e:
         print("Could not parse streams into columns")
         print(e)
-
-        return pd.DataFrame()
 
 
 def reverse_streams_column(df):
@@ -613,7 +625,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
 
     df = (pd.concat(results_dict.values(), axis=0))
     df['Link'] = df['Link'].apply(change_to_spotify)
-    df["Main_Artist"] = df["Artists"].str.split("/").str[0]
+    df["Main_Artist"] = df["Artists"].str.split("\n").str[0]
 
     # Reset the index
     df.reset_index(drop=True, inplace=True)
@@ -628,12 +640,10 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
             spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Main_Artist"], driver)
             row['Followers'] = spotify_followers
             row['Total_Fans'] = fans
+            # Fill empty cells with "N/A"
+            row = row.fillna("N/A")
+            print(f"Completed getting stats for {row['Song']} by {row['Main_Artist']} {index}/{len(df)}")
             final_df = append_row(final_df, row)
-
-            artist = row["Main_Artist"].str
-            song = row["Song"].str
-
-            print(f"Completed getting stats for {song} by {artist} {index}/{len(df)}")
 
         except Exception as e:
             print("Missing data for:")
@@ -698,10 +708,8 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     df["Song"] = df["Song"].astype(str)
     df.sort_values(by="Song", inplace=True)
 
-    df.to_csv(f'Soundcharts_{time.strftime("%Y-%m-%d %H-%M-%S")}.csv')
+    df.to_csv('soundcharts.csv')
     print("Saved to csv")
-    send_email_notification('Song Scraping: SUCCESS',
-                            'Your program is complete with no issues. Please check the results.')
 
 
 if __name__ == "__main__":
@@ -710,7 +718,6 @@ if __name__ == "__main__":
     total_tasks = 0
     tasks_completed = 0
     time_remaining = 0
-    task_time_list = [20]
     task_time = 0
     final_df = pd.DataFrame()
     pd.set_option('display.max_columns', 500)
@@ -719,8 +726,8 @@ if __name__ == "__main__":
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    country_list = ["AR", "AU", "AT", "CO", ]
-    extra_country_list = ['CA']
+    country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", ]
+    extra_country_list = ['US', 'GB', ]
 
     # extra_country_list = ['US', 'GB', 'CA', 'EE', 'UA', 'LT', 'LV', 'AT', 'KZ', 'BG', 'HU', 'CZ']
     platform_list = ["spotify", "apple-music", "shazam"]
@@ -732,5 +739,8 @@ if __name__ == "__main__":
                         "Warner Music", ]
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
-                       number_of_threads=2,
-                       test_mode=True)
+                       number_of_threads=4,
+                       test_mode=False)
+
+    send_email_notification('Song Scraping: SUCCESS',
+                            'Your program is complete with no issues. Please check the results.')
