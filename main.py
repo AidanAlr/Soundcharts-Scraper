@@ -169,6 +169,7 @@ class Link:
             "spotify": "",
             "apple-music": "top-100-global",
             "shazam": "shazam-top-200-world",
+            "soundcloud": "all-genres"
         }
         self.filters_dict = {
             # "no_labels": "eyJmbHQiOiJTZWxmIHJlbGVhc2VkfFVua25vd24ifQ%3D%3D",
@@ -649,14 +650,15 @@ def collect_all_genres_charts(driver, country_list, extra_country_list, platform
                     df["Platform"] = platform
                     # Add the dataframe to the dictionary
                     results_dict[f"{page.country}_{page.platform}"] = df
-                    print(f"Parsed {count}/{tasks} pages")
                     count += 1
+                    print(f"Parsed {count}/{tasks} pages")
                 except Exception as e:
                     print(e)
 
 
-def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads,
-        test_mode=False):
+def run_thread(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach,
+               number_of_threads,
+               test_mode=False):
     """
     This function runs the data collection process using a single thread.
 
@@ -688,7 +690,6 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
     # Concatenate all the dataframes in the results dictionary into a single dataframe
     df = (pd.concat(results_dict.values(), axis=0))
 
-    print(df)
     # Change the link to spotify
     df['Link'] = df['Link'].apply(change_to_spotify)
 
@@ -798,7 +799,7 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
         end_extra = start + tasks_from_extra_country_list_per_thread + (
             1 if i < extra_tasks_from_extra_country_list else 0)
 
-        t = Thread(target=run, args=(
+        t = Thread(target=run_thread, args=(
             country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
             labels_to_remove, detach, number_of_threads, test_mode))
         t.start()
@@ -833,16 +834,19 @@ if __name__ == "__main__":
     final_df = pd.DataFrame()
     pd.set_option('display.max_columns', 500)
 
-    COUNTRY_LIST = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
-                    "EC", "EG", "SV",
-                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
-                    "LV", "KZ", "LT", "LU",
-                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
-                    "SG", "SK", "KR", "ZA", "ES",
-                    "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
+    # country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
+    #                 "EC", "EG", "SV",
+    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
+    #                 "LV", "KZ", "LT", "LU",
+    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
+    #                 "SG", "SK", "KR", "ZA", "ES",
+    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
 
-    platform_list = ["spotify", "apple-music", "shazam"]
+    country_list = ["US", "GB", "CA", "EE", ]
+    extra_country_list = []
+
+    platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
                         'universal music', "yzy", "Island",
@@ -852,4 +856,4 @@ if __name__ == "__main__":
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
                        number_of_threads=3,
-                       test_mode=False)
+                       test_mode=True)
