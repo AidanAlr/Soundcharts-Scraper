@@ -25,11 +25,10 @@ def append_row(df, row):
                      ).reset_index(drop=True)
 
 
-def send_email_notification(recipient, subject, message):
+def send_email_notification(recipient, subject, message, attachment_path):
     sender_email = 'aidanalrawi@icloud.com'
     smtp_key = 'H7qhF8DV2ysktrv0'
-    recipient_email = 'aidanalrawi@icloud.com'
-    attachment_path = 'soundcharts.csv'
+    recipient_email = recipient
 
     # Setup the email message
     msg = MIMEMultipart()
@@ -117,7 +116,7 @@ def scroll(driver, scroll_amount):
             driver.execute_script("arguments[0].scrollTop += arguments[0].scrollHeight*0.2*arguments[1]", element,
                                   scroll_amount)
             time.sleep(0.5)
-    except Exception as e:
+    except Exception:
         print("Could not scroll")
 
 
@@ -233,7 +232,20 @@ def parse_songs(songs_and_genre):
     return songs
 
 
-def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
+def take_data_return_df(driver, labels_to_remove) -> pd.DataFrame():
+    """
+    This function extracts data from a webpage and returns it as a pandas DataFrame.
+
+    Parameters:
+    driver (webdriver): The selenium webdriver instance to interact with the webpage.
+    labels_to_remove (list): A list of labels to be removed from the data.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the extracted data from the webpage.
+
+    """
+
+    # CSS selectors for different elements on the webpage
     general_css_selector = {
         "songs": "div.sc-eTuwsz.jWHscE",
         "artists": "div.sc-esOvli.cfpVgy",
@@ -244,6 +256,8 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         "change": "div.sc-ekulBa.jsSggV",
         "genre": "div.sc-eTuwsz.jWHscE"
     }
+
+    # Find elements on the webpage using the CSS selectors
     songs = driver.find_elements(By.CSS_SELECTOR, general_css_selector["songs"])
     links = driver.find_elements(By.CSS_SELECTOR, general_css_selector["links"])
     artists = driver.find_elements(By.CSS_SELECTOR, general_css_selector["artists"])
@@ -253,9 +267,9 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
     change = driver.find_elements(By.CSS_SELECTOR, general_css_selector["change"])
     genre = driver.find_elements(By.CSS_SELECTOR, general_css_selector["genre"])
 
+    # Check if all elements have the same length
     if len(songs) == len(artists) == len(links) == len(rank) == len(doc) == len(labels) == len(change) == len(genre):
-        # Replace the last output with the new one
-        # sys.stdout.write("\r" + f"{counter}/4 SNG/ART/LINK/RANK/DOC/LABELS ({len(songs)} results)")
+        # Parse the elements into lists
         songs = parse_songs(songs)
         links = [parse_img_link(link) for link in links]
         artists = extract_names([div.text for div in artists])
@@ -265,7 +279,7 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         change = [div.text for div in change]
         genre = parse_genre(genre)
 
-        # create dataframe with columns
+        # Create a dataframe with the parsed data
         df = pd.DataFrame()
         df["rank"] = rank
         df["Song"] = songs
@@ -276,11 +290,10 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         df["Change"] = change
         df["Genre"] = genre
 
-        df = remove_songs_with_labels_from_df(df, labels_to_remove)
-        df = remove_songs_with_more_than_x_doc(df, 30)
         return df
 
     else:
+        # Print the lengths of the lists if they are not equal
         print("Genres: " + str(len(genre)))
         print("Songs: " + str(len(songs)))
         print("Artists: " + str(len(artists)))
@@ -293,23 +306,52 @@ def take_data_return_df(driver, labels_to_remove, counter=0) -> pd.DataFrame():
         print("Length of lists are not equal")
 
 
-def parse_webpage(driver, url, labels_to_remove, test_mode=False) -> pd.DataFrame():
+def parse_webpage(driver, url, labels_to_remove) -> pd.DataFrame():
+    """
+    This function parses a webpage and extracts relevant data into a pandas DataFrame.
+
+    Parameters:
+    driver (webdriver): The selenium webdriver instance to interact with the webpage.
+    url (str): The URL of the webpage to parse.
+    labels_to_remove (list): A list of labels to be removed from the data.
+
+    Returns:
+    pd.DataFrame: A DataFrame containing the parsed data from the webpage.
+
+    """
+
+    # Navigate to the specified URL
     driver.get(url)
-    # Cannot be lower than 5
+
+    # Pause the execution for 6 seconds to allow the webpage to load
     time.sleep(6)
+
+    # Sort the data on the webpage by DOC (Days on Chart)
     sort_by_doc(driver)
 
     result = []
 
+    # Scroll the webpage 5 times to load more data
     scroll_count = 5
-    for i in range(scroll_count):
+    for _ in range(scroll_count):
+        # Pause the execution for 0.25 seconds between each scroll
         time.sleep(0.25)
-        scroll(driver, 1)
-        result.append(take_data_return_df(driver, labels_to_remove, i))
 
+        # Scroll the webpage and append the extracted data to the result list
+        scroll(driver, 1)
+        result.append(take_data_return_df(driver, labels_to_remove))
+
+    # Concatenate all the dataframes in the result list into a single dataframe
     result_df = pd.concat(result, axis=0)
+
+    # Remove songs with specified labels and more than 30 days on chart
+    result_df = remove_songs_with_labels_from_df(result_df, labels_to_remove)
+    # Filter out songs with more than 100 days on chart
+    result_df = remove_songs_with_more_than_x_doc(result_df, 100)
+    # Filter out songs with more than 1 artist
+    result_df = result_df[~result_df["Artists"].str.contains("\n")]
+    # Remove duplicate songs, keeping only the first occurrence
     result_df = result_df.drop_duplicates(subset="Song", keep="first")
-    result_df = result_df[result_df["DOC"].astype(int) < 100]
     print("Parsing webpage: " + url + "(Success)")
     return result_df
 
@@ -347,7 +389,6 @@ def start_driver_and_login(detach=False):
                 return driver
 
         except Exception as e:
-            print(e)
             print("Could not log in, trying again in 5 seconds")
             time.sleep(5)
 
@@ -404,7 +445,7 @@ def get_streams(link, driver):
 
             # Find the child element which holds the stream data
             mouse_shifts = 14
-            for i in range(mouse_shifts):
+            for _ in range(mouse_shifts):
                 # Move the mouse horizontally by 20% of the tooltip wrapper size
                 if streams:
                     horizontal_move = tooltip_size['width'] * 0.04
@@ -426,8 +467,6 @@ def get_streams(link, driver):
 
         except Exception as e:
             print("Could not get streams for:" + link)
-            # if attempts == 2:
-            #     driver = start_driver_and_login()
             print(e)
             if attempts == 3:
                 return "Error", "Error"
@@ -456,7 +495,7 @@ def get_spotify_followers_and_total_fans(artist, driver):
         if spotify_followers:
             spotify = spotify_followers[0].split("\n")[1].replace(",", "")
 
-    except Exception as e:
+    except Exception:
         print("Could not get followers for:" + artist)
 
     try:
@@ -466,7 +505,7 @@ def get_spotify_followers_and_total_fans(artist, driver):
             total_fans = total_fans.text.split("\n")[1].replace(",", "")
             fans = total_fans
 
-    except Exception as e:
+    except Exception:
         print("Could not get total fans for:" + artist)
 
     # print(f"Spotify followers: {spotify}, Total fans: {fans} - {artist}")
@@ -536,7 +575,7 @@ def reverse_streams_column(df):
     return df
 
 
-def get_extra_song_chart_data(driver, extra_country_list, results_dict, test_mode):
+def get_extra_song_chart_data(driver, extra_country_list, results_dict):
     ####
     # Extra tasks to get genre specific data from apple music
     # US, UK, Canada, Estonia, Ukraine, Lithuania, Latvia, Austria, Kazakhstan, Bulgaria, Hungary, Czechia
@@ -574,31 +613,25 @@ def get_extra_song_chart_data(driver, extra_country_list, results_dict, test_mod
             f"https://app.soundcharts.com/app/market/charts?chart=alternative-{alternative_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music")
         dance_link = f"https://app.soundcharts.com/app/market/charts?chart=dance-{dance_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music"
         try:
-            df = parse_webpage(driver, alternative_link, labels_to_remove, test_mode)
+            df = parse_webpage(driver, alternative_link, labels_to_remove)
             # Add the country and platform to the dataframe
             df["Country"] = country
             df["Platform"] = "apple-music"
             df["Genre"] = "Alternative"
             results_dict[f"{country}_{alternative_link}"] = df
 
-            df = parse_webpage(driver, dance_link, labels_to_remove, test_mode)
+            df = parse_webpage(driver, dance_link, labels_to_remove)
             df["Country"] = country
             df["Platform"] = "apple-music"
             df["Genre"] = "Dance"
             results_dict[f"{country}_{dance_link}"] = df
+
         except Exception as e:
             print(e)
-            pass
 
 
-def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads,
-        test_mode=False):
-    global final_df
-
-    driver = start_driver_and_login(detach=detach)
-
-    results_dict = {}
-
+def collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list, labels_to_remove,
+                              results_dict, test_mode) -> None:
     tasks = len(country_list) * len(platform_list) * len(filters_list) + len(extra_country_list) * 2
     count = 0
     for country in country_list:
@@ -608,7 +641,7 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                     # Create the link
                     page = Link("song", country, platform, filters)
                     # Parse the webpage
-                    df = parse_webpage(driver, page.link, labels_to_remove, test_mode)
+                    df = parse_webpage(driver, page.link, labels_to_remove)
                     if test_mode:
                         df = df.head(5)
                     # Add the country and platform to the dataframe
@@ -621,48 +654,132 @@ def run(country_list, extra_country_list, platform_list, filters_list, labels_to
                 except Exception as e:
                     print(e)
 
-    get_extra_song_chart_data(driver, extra_country_list, results_dict, test_mode)
 
+def run(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach, number_of_threads,
+        test_mode=False):
+    """
+    This function runs the data collection process using a single thread.
+
+    Parameters:
+    country_list (list): A list of countries to collect data from.
+    extra_country_list (list): A list of additional countries to collect data from.
+    platform_list (list): A list of platforms to collect data from.
+    filters_list (list): A list of filters to apply during data collection.
+    labels_to_remove (list): A list of labels to remove from the data.
+    detach (bool): Whether to detach the webdriver after data collection.
+    number_of_threads (int): The number of threads to use for data collection.
+    test_mode (bool): Whether to run the function in test mode.
+
+    """
+
+    global final_df
+
+    # Start the webdriver and login
+    driver = start_driver_and_login(detach=detach)
+
+    results_dict = {}
+
+    # Collect all genres charts
+    collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list, labels_to_remove,
+                              results_dict, test_mode)
+    # Get extra song chart data
+    get_extra_song_chart_data(driver, extra_country_list, results_dict)
+
+    # Concatenate all the dataframes in the results dictionary into a single dataframe
     df = (pd.concat(results_dict.values(), axis=0))
+
+    print(df)
+    # Change the link to spotify
     df['Link'] = df['Link'].apply(change_to_spotify)
-    df["Main_Artist"] = df["Artists"].str.split("\n").str[0]
 
     # Reset the index
     df.reset_index(drop=True, inplace=True)
     task_time = []
-    # # Loop through each row in the df and get the streams/total streams/followers/fans
+    # Loop through each row in the df and get the streams/total streams/followers/fans
     for index, row in df.iterrows():
         try:
             start_time = time.time()
 
+            # Get the daily streams and total streams
             daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
             # Add entire row to the dataframe
             row['Streams'] = daily_streams
             row['Total_Streams'] = total_streams
 
-            spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Main_Artist"], driver)
+            # Get the spotify followers and total fans
+            spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Artists"], driver)
             row['Followers'] = spotify_followers
             row['Total_Fans'] = fans
+            # Append the row to the final dataframe
             final_df = append_row(final_df, row)
 
             end_time = time.time()
 
+            # Calculate the time remaining
             task_time.append(end_time - start_time)
             task_time = task_time[-10:]
             time_remaining = (sum(task_time) / len(task_time)) * (len(df) - int(index))
             time_remaining_string = convert_seconds_to_time_str(time_remaining)
             print(
-                f"Got stats for {row['Song']} by {row['Main_Artist']} {index}/{len(df)} - {time_remaining_string} remaining")
+                f"Got stats for {row['Song']} by {row['Artists']} {index}/{len(df)} - {time_remaining_string} remaining")
 
         except Exception as e:
-            print("Missing data for:")
+            print("Problem getting data for:")
             print(row)
 
     print("Finished getting stats for all songs on this thread")
 
 
+def apply_final_filters_and_formatting(df):
+    # Convert the followers column to numeric
+    df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
+    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
+    df['Total_Streams'] = df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
+
+    # Parse the streams into separate columns
+    stream_df = parse_streams_into_columns(df)
+
+    # Concat the streams columns with the original dataframe
+    df = pd.concat([df, stream_df], axis=1)
+    #
+    df = df[df["Total_Fans"] < 100_000]
+    df = df[df['Total_Streams'] < 5_000_000]
+    df = df[df["3_day_avg"] > 2000]
+
+    # Reverse the streams column
+    df = reverse_streams_column(df)
+
+    df["Song"] = df["Song"].astype(str)
+    df.sort_values(by="Song", inplace=True)
+
+    desired_order = ['Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Followers',
+                     'Total_Fans', 'Link', 'Song', 'DOC', 'rank', 'Change', 'Total_Streams', 'Streams', 'Yesterday',
+                     '3_day_avg',
+                     '3_day_%_change', '5_day_%_change', '10_day_%_change']
+
+    # Reorder the columns
+    df = df[desired_order]
+
+    return df
+
+
 def run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach,
                        number_of_threads, test_mode):
+    """
+    This function runs the data collection process using multiple threads.
+
+    Parameters:
+    country_list (list): A list of countries to collect data from.
+    extra_country_list (list): A list of additional countries to collect data from.
+    platform_list (list): A list of platforms to collect data from.
+    filters_list (list): A list of filters to apply during data collection.
+    labels_to_remove (list): A list of labels to remove from the data.
+    detach (bool): Whether to detach the webdriver after data collection.
+    number_of_threads (int): The number of threads to use for data collection.
+    test_mode (bool): Whether to run the function in test mode.
+
+    """
+
     threads = []
 
     if len(country_list) < number_of_threads:
@@ -694,59 +811,37 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
         t.join()
 
     global final_df
-    df = final_df
+    final_df = apply_final_filters_and_formatting(final_df)
 
-    # Convert the followers column to numeric
-    df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
-    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
-    df['Total_Streams'] = df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
-
-    # Parse the streams into separate columns
-    stream_df = parse_streams_into_columns(df)
-
-    # Concat the streams columns with the original dataframe
-    df = pd.concat([df, stream_df], axis=1)
-
-    df = df[df["Total_Fans"] < 1_000_000]
-    df = df[df['Total_Streams'] < 2_000_000]
-    df = df[df["3_day_avg"] > 2000]
-
-    # Reverse the streams column
-    df = reverse_streams_column(df)
-
-    df["Song"] = df["Song"].astype(str)
-    df.sort_values(by="Song", inplace=True)
-
-    desired_order = ['Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Main_Artist', 'Followers',
-                     'Total_Fans', 'Link', 'Song', 'DOC', 'rank', 'Change', 'Total_Streams', 'Streams', 'Yesterday',
-                     '3_day_avg',
-                     '3_day_%_change', '5_day_%_change', '10_day_%_change']
-
-    # Reorder the columns
-    df = df[desired_order]
-
-    df.to_csv('soundcharts.csv')
+    completion_time = time.strftime("%Y-%m-%d %H-%M")
+    file_path = f'soundcharts {completion_time}.csv'
+    final_df.to_csv(file_path, index=False)
     print("Saved to csv")
+
+    send_email_notification("aidanalrawi@icloud.com",
+                            'Song Scraping: SUCCESS',
+                            'Your program is complete with no issues. Please check the results.',
+                            file_path)
+
+    # send_email_notification("jhlevy01@gmail.com",
+    #                         'Chart Scraping: SUCCESS',
+    #                         'Your program is complete with no issues. Please check the results.')
 
 
 if __name__ == "__main__":
-    global songs_to_get_stats_for, result_dfs_to_concat, final_df, total_tasks, tasks_completed, time_remaining, task_time, task_time_list
-    songs_to_get_stats_for = 0
-    total_tasks = 0
-    tasks_completed = 0
-    time_remaining = 0
-    task_time = 0
+    global final_df
     final_df = pd.DataFrame()
     pd.set_option('display.max_columns', 500)
 
-    # COUNTRY_LIST = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT", "LU",
-    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK", "KR", "ZA", "ES",
-    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
-    country_list = ["AR", "AU", "AT", ]
+    COUNTRY_LIST = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
+                    "EC", "EG", "SV",
+                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
+                    "LV", "KZ", "LT", "LU",
+                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
+                    "SG", "SK", "KR", "ZA", "ES",
+                    "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
 
-    extra_country_list = ["US", "GB", "CA", ]
     platform_list = ["spotify", "apple-music", "shazam"]
     filters_list = ["no_labels"]
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
@@ -756,13 +851,5 @@ if __name__ == "__main__":
                         "Warner Music", ]
 
     run_with_threading(country_list, extra_country_list, platform_list, filters_list, labels_to_remove, detach=False,
-                       number_of_threads=4,
+                       number_of_threads=3,
                        test_mode=False)
-
-    send_email_notification("aidanalrawi@icloud.com",
-                            'Song Scraping: SUCCESS',
-                            'Your program is complete with no issues. Please check the results.')
-
-    # send_email_notification("jhlevy01@gmail.com",
-    #                         'Song Scraping: SUCCESS',
-    #                         'Hopefully u receive this bro.')
