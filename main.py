@@ -1,4 +1,5 @@
 import math
+import statistics
 import time
 from threading import Thread
 
@@ -60,7 +61,7 @@ def send_email_notification(recipient, subject, message, attachment_path):
     # Send the email
     try:
         server.sendmail(sender_email, recipient_email, msg.as_string())
-        print("Email notification sent successfully.")
+        print("Email notification sent successfully to:", recipient_email)
         return True
     except Exception as e:
         print("Failed to send email:", e)
@@ -293,17 +294,7 @@ def take_data_return_df(driver) -> pd.DataFrame():
         return df
 
     else:
-        # Print the lengths of the lists if they are not equal
-        print("Genres: " + str(len(genre)))
-        print("Songs: " + str(len(songs)))
-        print("Artists: " + str(len(artists)))
-        print("Links: " + str(len(links)))
-        print("Rank: " + str(len(rank)))
-        print("DOC: " + str(len(doc)))
-        print("Labels: " + str(len(labels)))
-        print("Change: " + str(len(change)))
-
-        print("Length of lists are not equal")
+        print("Inconsistent webpage schema trying again.")
 
 
 def parse_webpage(driver, url) -> pd.DataFrame():
@@ -355,7 +346,7 @@ def parse_webpage(driver, url) -> pd.DataFrame():
     return result_df
 
 
-def start_driver_and_login(detach=False):
+def login_to_new_driver(detach=False) -> webdriver.Chrome():
     while True:
         try:
             options = Options()
@@ -445,14 +436,15 @@ def get_streams(link, driver):
             time.sleep(5)
 
             # Find the parent element and move to it
-            tooltip = locate_and_move_to_spotify_chart(driver)
+            tooltip_size = locate_and_move_to_spotify_chart(driver)
 
             # Find the child element which holds the stream data
             mouse_shifts = 14
             for _ in range(mouse_shifts):
                 # Move the mouse horizontally by 20% of the tooltip wrapper size
-                horizontal_move = tooltip['width'] * 0.04
-                ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
+                if streams:
+                    horizontal_move = tooltip_size['width'] * 0.04
+                    ActionChains(driver).move_by_offset(horizontal_move, 0).perform()
 
                 child_elements = driver.find_elements(By.CSS_SELECTOR, "div.sc-laTMn.ktlmrZ")
                 child_elements = [element.text for element in child_elements][0].split("\n")
@@ -523,7 +515,6 @@ def parse_streams_into_columns(df):
         streams_df = df["Streams"].str.split("\n", expand=True)
         streams_df = pd.DataFrame(streams_df)
         streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
-        # streams_df.drop(streams_df.columns[-1], axis=1, inplace=True)
 
         # Extract column names from first row with all the dates
         # Find a full row with dates
@@ -658,8 +649,7 @@ def collect_all_genres_charts(driver, country_list, extra_country_list, platform
                     print(e)
 
 
-def run_thread(country_list, extra_country_list, platform_list, filters_list, detach,
-               number_of_threads,
+def run_thread(country_list, extra_country_list, platform_list, filters_list, detach, thread_number,
                test_mode=False):
     """
     This function runs the data collection process using a single thread.
@@ -678,7 +668,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
     global final_df
 
     # Start the webdriver and login
-    driver = start_driver_and_login(detach=detach)
+    driver = login_to_new_driver(detach=detach)
 
     results_dict = {}
 
@@ -696,6 +686,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
     # Reset the index
     df.reset_index(drop=True, inplace=True)
+
     task_time = []
     # Loop through each row in the df and get the streams/total streams/followers/fans
     for index, row in df.iterrows():
@@ -719,11 +710,11 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
             # Calculate the time remaining
             task_time.append(end_time - start_time)
-            task_time = task_time[-10:]
-            time_remaining = (sum(task_time) / len(task_time)) * (len(df) - int(index))
+            task_time_avg = statistics.mean(task_time[-5:])
+            global time_remaining
+            time_remaining = task_time_avg * (len(df) - int(index))
             time_remaining_string = convert_seconds_to_time_str(time_remaining)
-            print(
-                f"Got stats for {row['Song']} by {row['Artists']} {index}/{len(df)} - {time_remaining_string} remaining")
+            print(f"Thread {thread_number} got stats for {row['Song']}{index}/{len(df)} | {time_remaining_string} remaining")
 
         except Exception:
             print("Problem getting data for:")
@@ -757,8 +748,7 @@ def apply_final_filters_and_formatting(df):
 
     desired_order = ['Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Followers',
                      'Total_Fans', 'Link', 'Song', 'DOC', 'rank', 'Change', 'Total_Streams', 'Streams', 'Yesterday',
-                     '3_day_avg',
-                     '3_day_%_change', '5_day_%_change', '10_day_%_change']
+                     '3_day_avg', '3_day_%_change', '5_day_%_change', '10_day_%_change']
 
     # Reorder the columns
     df = df[desired_order]
@@ -882,7 +872,7 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
         t = Thread(target=run_thread,
                    args=(
                        country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
-                       detach, number_of_threads, test_mode))
+                       detach, i, test_mode))
         t.start()
         threads.append(t)
 
@@ -898,20 +888,22 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
     completion_time = time.strftime("%Y-%m-%d %H-%M")
     file_path = f'soundcharts {completion_time}.csv'
     final_df.to_csv(file_path, index=False)
-    print("Saved to csv")
+    print("Saved to csv: " + file_path)
+
+    # send_email_notification("jhlevy01@gmail.com",
+    #                         'Song Scraping: SUCCESS',
+    #                         'Your program is complete with no issues. Please check the results.',
+    #                         file_path)
 
     send_email_notification("aidanalrawi@icloud.com",
-                            'Song Scraping: SUCCESS',
+                            'Chart Scraping: SUCCESS',
                             'Your program is complete with no issues. Please check the results.',
                             file_path)
 
-    # send_email_notification("jhlevy01@gmail.com",
-    #                         'Chart Scraping: SUCCESS',
-    #                         'Your program is complete with no issues. Please check the results.')
-
 
 if __name__ == "__main__":
-    global final_df
+    global final_df, time_remaining
+    time_remaining = 0
     final_df = pd.DataFrame()
     pd.set_option('display.max_columns', 500)
 
@@ -924,9 +916,8 @@ if __name__ == "__main__":
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
     # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
 
-    country_list = ["US", "GB", ]
+    country_list = ["KZ", "BG", "HU", "CZ"]
     extra_country_list = []
-
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
 
