@@ -665,7 +665,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
     """
 
-    global final_df, time_remaining_dict
+    global final_df
 
     # Start the webdriver and login
     driver = login_to_new_driver(detach=detach)
@@ -680,6 +680,9 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
     # Concatenate all the dataframes in the results dictionary into a single dataframe
     df = (pd.concat(results_dict.values(), axis=0))
+
+    # Drop duplicates based on song
+    df = df.drop_duplicates(subset="Song", keep="first")
 
     # Change the link to spotify
     df['Link'] = df['Link'].apply(change_to_spotify)
@@ -720,6 +723,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
             # Calculate the time remaining
             task_time_avg = end_time - start_time
+            global time_remaining_dict
             time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
             time_remaining_string = convert_seconds_to_time_str(max(time_remaining_dict.values()))
             print(f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")

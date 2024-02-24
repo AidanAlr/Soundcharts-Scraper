@@ -681,6 +681,9 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
     # Concatenate all the dataframes in the results dictionary into a single dataframe
     df = (pd.concat(results_dict.values(), axis=0))
 
+    # Drop duplicates based on song
+    df = df.drop_duplicates(subset="Song", keep="first")
+
     # Change the link to spotify
     df['Link'] = df['Link'].apply(change_to_spotify)
 
