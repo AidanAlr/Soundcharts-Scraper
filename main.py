@@ -665,7 +665,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
     """
 
-    global final_df
+    global final_df, time_remaining_dict
 
     # Start the webdriver and login
     driver = login_to_new_driver(detach=detach)
@@ -687,36 +687,45 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
     # Reset the index
     df.reset_index(drop=True, inplace=True)
 
-    task_time = []
     # Loop through each row in the df and get the streams/total streams/followers/fans
     for index, row in df.iterrows():
         try:
             start_time = time.time()
 
-            # Get the daily streams and total streams
-            daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
-            # Add entire row to the dataframe
-            row['Streams'] = daily_streams
-            row['Total_Streams'] = total_streams
-
             # Get the spotify followers and total fans
             spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Artists"], driver)
             row['Followers'] = spotify_followers
             row['Total_Fans'] = fans
-            # Append the row to the final dataframe
-            final_df = append_row(final_df, row)
+
+            # Cast the followers and total fans to numeric
+            row['Followers'] = pd.to_numeric(row['Followers'], errors='coerce')
+            row['Total_Fans'] = pd.to_numeric(row['Total_Fans'], errors='coerce')
+
+            if row['Total_Fans'] < 100_000:
+
+                # Get the daily streams and total streams
+                daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
+                # Add entire row to the dataframe
+                row['Streams'] = daily_streams
+                row['Total_Streams'] = total_streams
+
+                # Cast the total streams to numeric
+                row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
+
+                # Only add rows with total fans less than 100,000 and total streams less than 5,000,000
+                if row['Total_Fans'] < 100_000 and row['Total_Streams'] < 5_000_000:
+                    final_df = append_row(final_df, row)
 
             end_time = time.time()
 
             # Calculate the time remaining
-            task_time.append(end_time - start_time)
-            task_time_avg = statistics.mean(task_time[-5:])
-            global time_remaining
-            time_remaining = task_time_avg * (len(df) - int(index))
-            time_remaining_string = convert_seconds_to_time_str(time_remaining)
-            print(f"Thread {thread_number} got stats for {row['Song']}{index}/{len(df)} | {time_remaining_string} remaining")
+            task_time_avg = end_time - start_time
+            time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
+            time_remaining_string = convert_seconds_to_time_str(max(time_remaining_dict.values()))
+            print(f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
 
-        except Exception:
+        except Exception as e:
+            print(e)
             print("Problem getting data for:")
             print(row)
 
@@ -724,26 +733,16 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
 
 
 def apply_final_filters_and_formatting(df):
-    # Convert the followers column to numeric
-    df["Followers"] = df['Followers'].apply(pd.to_numeric, errors='coerce')
-    df['Total_Fans'] = df['Total_Fans'].apply(pd.to_numeric, errors='coerce')
-    df['Total_Streams'] = df['Total_Streams'].apply(pd.to_numeric, errors='coerce')
-
-    # Parse the streams into separate columns
-    stream_df = parse_streams_into_columns(df)
-
     # Concat the streams columns with the original dataframe
-    df = pd.concat([df, stream_df], axis=1)
-    #
-    df = df[df["Total_Fans"] < 100_000]
-    df = df[df['Total_Streams'] < 5_000_000]
-    df = df[df["3_day_avg"] > 2000]
+    df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
     # Reverse the streams column
     df = reverse_streams_column(df)
+
     df['Streams'] = df['Streams'].apply(lambda x: x.lstrip(" - \n"))
 
     df["Song"] = df["Song"].astype(str)
+
     df.sort_values(by="Song", inplace=True)
 
     desired_order = ['Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Followers',
@@ -887,13 +886,14 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
 
     completion_time = time.strftime("%Y-%m-%d %H-%M")
     file_path = f'soundcharts {completion_time}.csv'
+    time.sleep(1)
     final_df.to_csv(file_path, index=False)
     print("Saved to csv: " + file_path)
 
-    # send_email_notification("jhlevy01@gmail.com",
-    #                         'Song Scraping: SUCCESS',
-    #                         'Your program is complete with no issues. Please check the results.',
-    #                         file_path)
+    send_email_notification("jhlevy01@gmail.com",
+                            'Song Scraping: SUCCESS',
+                            'Your program is complete with no issues. Please check the results.',
+                            file_path)
 
     send_email_notification("aidanalrawi@icloud.com",
                             'Chart Scraping: SUCCESS',
@@ -903,10 +903,10 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
 
 if __name__ == "__main__":
     global final_df, time_remaining
-    time_remaining = 0
+    time_remaining_dict = {}
     final_df = pd.DataFrame()
     pd.set_option('display.max_columns', 500)
-
+    #
     # country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
     #                 "EC", "EG", "SV",
     #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
@@ -914,9 +914,10 @@ if __name__ == "__main__":
     #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
     #                 "SG", "SK", "KR", "ZA", "ES",
     #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+
     # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
 
-    country_list = ["KZ", "BG", "HU", "CZ"]
+    country_list = ["KZ", "BG", "HU"]
     extra_country_list = []
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
