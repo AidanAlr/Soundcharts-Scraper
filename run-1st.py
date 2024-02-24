@@ -906,18 +906,14 @@ if __name__ == "__main__":
     time_remaining_dict = {}
     final_df = pd.DataFrame()
     pd.set_option('display.max_columns', 500)
-    #
-    # country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
-    #                 "EC", "EG", "SV",
-    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
-    #                 "LV", "KZ", "LT", "LU",
-    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
-    #                 "SG", "SK", "KR", "ZA", "ES",
-    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
 
-    # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
+    country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
+                    "EC", "EG", "SV",
+                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
+                    "LV", "KZ", "LT", "LU",
+                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
+                    ]
 
-    country_list = ["KZ", "BG", "HU"]
     extra_country_list = []
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
@@ -927,5 +923,5 @@ if __name__ == "__main__":
                        platform_list,
                        filters_list,
                        detach=False,
-                       number_of_threads=4,
-                       test_mode=True)
+                       number_of_threads=3,
+                       test_mode=False)
