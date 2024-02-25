@@ -342,7 +342,9 @@ def parse_webpage(driver, url) -> pd.DataFrame():
     result_df = result_df[~result_df["Artists"].str.contains("\n")]
     # Remove duplicate songs, keeping only the first occurrence
     result_df = result_df.drop_duplicates(subset="Song", keep="first")
-    print("Parsing webpage: " + url + "(Success)")
+
+    print("Parsing webpage (Successful) ->")
+    print(url)
     return result_df
 
 
@@ -490,20 +492,14 @@ def get_spotify_followers_and_total_fans(artist, driver):
         if spotify_followers:
             spotify = spotify_followers[0].split("\n")[1].replace(",", "")
 
-    except Exception:
-        print("Could not get followers for:" + artist)
-
-    try:
         total_fans = driver.find_element(By.CSS_SELECTOR, "div.sc-dUjcNx.VujJl")
-
         if total_fans and "Total fans" in total_fans.text:
             total_fans = total_fans.text.split("\n")[1].replace(",", "")
             fans = total_fans
 
     except Exception:
-        print("Could not get total fans for:" + artist)
+        print("Could not get total fans or followers for:" + artist)
 
-    # print(f"Spotify followers: {spotify}, Total fans: {fans} - {artist}")
     return spotify, fans
 
 
@@ -566,6 +562,19 @@ def reverse_streams_column(df):
     streams = ["\n".join(stream) for stream in streams]
     streams = [stream.replace("\n - \n", "") for stream in streams]
     df["Streams"] = streams
+    return df
+
+
+def remove_duplicates_based_on_song_and_link(df):
+    df["Song"] = df["Song"].astype(str)
+    df["Link"] = df["Link"].astype(str)
+
+    df = df[~df['Song'].duplicated(keep='first')]
+    df = df[~df['Link'].duplicated(keep='first')]
+
+    df.drop_duplicates(subset="Song", inplace=True, keep="first")
+    df.drop_duplicates(subset="Link", inplace=True, keep="first")
+
     return df
 
 
@@ -679,10 +688,9 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
     get_extra_song_chart_data(driver, extra_country_list, results_dict)
 
     # Concatenate all the dataframes in the results dictionary into a single dataframe
-    df = (pd.concat(results_dict.values(), axis=0))
+    df = pd.concat(results_dict.values(), axis=0)
 
-    # Drop duplicates based on song
-    df = df.drop_duplicates(subset="Song", keep="first")
+    df = remove_duplicates_based_on_song_and_link(df)
 
     # Change the link to spotify
     df['Link'] = df['Link'].apply(change_to_spotify)
@@ -690,49 +698,52 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
     # Reset the index
     df.reset_index(drop=True, inplace=True)
 
+    task_time_list = []
     # Loop through each row in the df and get the streams/total streams/followers/fans
     for index, row in df.iterrows():
-        try:
-            start_time = time.time()
+        # Only allow rows with song not in the final_df
+        if row["Song"] not in final_df["Song"].values and row["Link"] not in final_df["Link"].values:
+            try:
+                start_time = time.time()
 
-            # Get the spotify followers and total fans
-            spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Artists"], driver)
-            row['Followers'] = spotify_followers
-            row['Total_Fans'] = fans
+                # Get the spotify followers and total fans
+                spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Artists"], driver)
+                row['Followers'] = spotify_followers
+                row['Total_Fans'] = fans
 
-            # Cast the followers and total fans to numeric
-            row['Followers'] = pd.to_numeric(row['Followers'], errors='coerce')
-            row['Total_Fans'] = pd.to_numeric(row['Total_Fans'], errors='coerce')
+                # Cast the followers and total fans to numeric
+                row['Followers'] = pd.to_numeric(row['Followers'], errors='coerce')
+                row['Total_Fans'] = pd.to_numeric(row['Total_Fans'], errors='coerce')
 
-            if row['Total_Fans'] < 100_000:
+                if row['Total_Fans'] < 100_000:
 
-                # Get the daily streams and total streams
-                daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
-                # Add entire row to the dataframe
-                row['Streams'] = daily_streams
-                row['Total_Streams'] = total_streams
+                    # Get the daily streams and total streams
+                    daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
+                    # Add entire row to the dataframe
+                    row['Streams'] = daily_streams
+                    row['Total_Streams'] = total_streams
 
-                # Cast the total streams to numeric
-                row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
+                    # Cast the total streams to numeric
+                    row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
 
-                # Only add rows with total fans less than 100,000 and total streams less than 5,000,000
-                if row['Total_Fans'] < 100_000 and row['Total_Streams'] < 5_000_000:
-                    final_df = append_row(final_df, row)
+                    # Only add rows with total fans less than 100,000 and total streams less than 5,000,000
+                    if row['Total_Fans'] < 100_000 and row['Total_Streams'] < 5_000_000:
+                        final_df = append_row(final_df, row)
 
-            end_time = time.time()
+                end_time = time.time()
 
-            # Calculate the time remaining
-            task_time_avg = end_time - start_time
-            time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
-            time_remaining_string = convert_seconds_to_time_str(max(time_remaining_dict.values()))
-            print(f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
+                task_time_list.append(end_time - start_time)
+                # Calculate the time remaining
+                task_time_avg = statistics.mean(task_time_list[-10:])
+                time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
+                time_remaining_string = convert_seconds_to_time_str(statistics.mean(time_remaining_dict.values()))
+                print(f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
 
-        except Exception as e:
-            print(e)
-            print("Problem getting data for:")
-            print(row)
+            except Exception as e:
+                print(e)
+                print(f"Could not get stats for {row['Song']}")
 
-    print("Finished getting stats for all songs on this thread")
+    print(f"Finished getting stats for all songs on thread {thread_number}")
 
 
 def apply_final_filters_and_formatting(df):
@@ -743,8 +754,6 @@ def apply_final_filters_and_formatting(df):
     df = reverse_streams_column(df)
 
     df['Streams'] = df['Streams'].apply(lambda x: x.lstrip(" - \n"))
-
-    df["Song"] = df["Song"].astype(str)
 
     df.sort_values(by="Song", inplace=True)
 
@@ -907,21 +916,20 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
 if __name__ == "__main__":
     global final_df, time_remaining_dict
     time_remaining_dict = {}
-    final_df = pd.DataFrame()
+    # Make a df with a column for the song
+    final_df = pd.DataFrame(columns=["Song", "Link"])
     pd.set_option('display.max_columns', 500)
-    #
-    # country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
-    #                 "EC", "EG", "SV",
-    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
-    #                 "LV", "KZ", "LT", "LU",
-    #                 "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
-    #                 "SG", "SK", "KR", "ZA", "ES",
-    #                 "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
 
-    # extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
+    country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO",
+                    "EC", "EG", "SV",
+                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP",
+                    "LV", "KZ", "LT", "LU",
+                    "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO",
+                    "SG", "SK", "KR", "ZA", "ES",
+                    "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
 
-    country_list = ["KZ", "BG", "HU"]
-    extra_country_list = []
+    extra_country_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
+
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
 
@@ -930,5 +938,5 @@ if __name__ == "__main__":
                        platform_list,
                        filters_list,
                        detach=False,
-                       number_of_threads=4,
-                       test_mode=True)
+                       number_of_threads=3,
+                       test_mode=False)
