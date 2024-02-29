@@ -573,7 +573,7 @@ def reverse_streams_column(df):
     streams = ["\n".join(stream) for stream in streams]
     streams = [stream.replace("\n - \n", "") for stream in streams]
     df["Streams"] = streams
-    df['Streams'] = df['Streams'].apply(lambda x: x.lstrip(" - \n"))
+    df["Streams"] = df["Streams"].apply(lambda x: x.lstrip(" - \n"))
     return df
 
 
@@ -670,15 +670,6 @@ def collect_all_genres_charts(driver, country_list, extra_country_list, platform
                     print(e)
 
 
-def print_progress(time_remaining_dict, task_time_list, index, row, thread_number, df):
-    # Calculate the time remaining
-    task_time_avg = statistics.mean(task_time_list[-10:])
-    time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
-    time_remaining_string = convert_seconds_to_time_str(statistics.mean(time_remaining_dict.values()))
-    print(
-        f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
-
-
 def run_thread(country_list, extra_country_list, platform_list, filters_list, detach, thread_number,
                test_mode=False):
     """
@@ -754,7 +745,11 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
                 end_time = time.time()
 
                 task_time_list.append(end_time - start_time)
-                print_progress(time_remaining_dict, task_time_list, index, row, thread_number, df)
+                # Calculate the time remaining
+                task_time_avg = statistics.mean(task_time_list[-10:])
+                time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
+                time_remaining_string = convert_seconds_to_time_str(statistics.mean(time_remaining_dict.values()))
+                print(f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
 
             except Exception as e:
                 print(e)
@@ -767,15 +762,15 @@ def apply_final_filters_and_formatting(df):
     # Concat the streams columns with the original dataframe
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
-    df = df[df["3_day_avg"] > 2000]
-
     # Reverse the streams column
     df = reverse_streams_column(df)
 
+    df['Streams'] = df['Streams'].apply(lambda x: x.lstrip(" - \n"))
+
     df.sort_values(by="Country", inplace=True)
 
-    desired_order = ['Link', 'Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Followers',
-                     'Total_Fans', 'Song', 'DOC', 'rank', 'Change', 'Total_Streams', 'Streams', 'Yesterday',
+    desired_order = ['Country', 'Platform', 'Genre', 'Labels', 'Artists', 'Followers',
+                     'Total_Fans', 'Link', 'Song', 'DOC', 'rank', 'Change', 'Total_Streams', 'Streams', 'Yesterday',
                      '3_day_avg', '3_day_%_change', '5_day_%_change', '10_day_%_change']
 
     # Reorder the columns
@@ -861,98 +856,46 @@ def apply_final_filters_and_formatting(df):
     return df
 
 
-def run_with_threading(country_list, extra_country_list, platform_list, filters_list, detach,
-                       number_of_threads, test_mode):
-    """
-    This function runs the data collection process using multiple threads.
+def scrape_watchlist(watchlist: []):
+    driver = login_to_new_driver(detach=True)
 
-    Parameters:
-    country_list (list): A list of countries to collect data from.
-    extra_country_list (list): A list of additional countries to collect data from.
-    platform_list (list): A list of platforms to collect data from.
-    filters_list (list): A list of filters to apply during data collection.
-    detach (bool): Whether to detach the webdriver after data collection.
-    number_of_threads (int): The number of threads to use for data collection.
-    test_mode (bool): Whether to run the function in test mode.
+    df = pd.DataFrame([],
+                      columns=["Link", "Total_Streams", "Streams"])
 
-    """
-    # List to store the threads
-    threads = []
+    for link in watchlist:
+        print("Scraping link", link)
+        streams, total_streams, *_ = get_streams(link, driver)
+        song_and_artist = driver.find_element(By.CSS_SELECTOR, "div.sc-hZhUor.cPnknH").text.split("\n")
+        song, artist = song_and_artist[0].lstrip("by"), song_and_artist[1]
 
-    # If the number of threads is greater than the length of the country list, reduce the number of threads
-    number_of_threads = min(number_of_threads, len(country_list))
+        new_row = pd.DataFrame([[artist, song, link, total_streams, streams]],
+                               columns=["Artist", "Song", "Link", "Total_Streams", "Streams"])
+        df = pd.concat([df, new_row], axis=0)
 
-    # Calculate the number of tasks per thread
-    tasks_per_thread = len(country_list) // number_of_threads
-    extra_tasks = len(country_list) % number_of_threads
+    df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
+    df = reverse_streams_column(df)
+    # Reorder the columns
+    df = df[['Link', 'Artist', 'Song', 'Total_Streams', 'Streams', 'Yesterday', '3_day_avg', '3_day_%_change',
+             '5_day_%_change', '10_day_%_change']]
+    
+    df.to_csv("watchlist.csv", index=False)
 
-    # Calculate the number of tasks per thread for the extra country list
-    tasks_from_extra_country_list_per_thread = len(extra_country_list) // number_of_threads
-    extra_tasks_from_extra_country_list = len(extra_country_list) % number_of_threads
-
-    start = 0
-    start_extra = 0
-
-    for i in range(number_of_threads):
-        end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
-        end_extra = start + tasks_from_extra_country_list_per_thread + (
-            1 if i < extra_tasks_from_extra_country_list else 0)
-        t = Thread(target=run_thread,
-                   args=(
-                       country_list[start:end], extra_country_list[start_extra:end_extra], platform_list, filters_list,
-                       detach, i, test_mode))
-        t.start()
-        threads.append(t)
-
-        start = end
-        start_extra = end_extra
-
-    for t in threads:
-        t.join()
-
-    global final_df
-    final_df = apply_final_filters_and_formatting(final_df)
-
-    completion_time = time.strftime("%Y-%m-%d %H-%M")
-    file_path = f'soundcharts {completion_time}.csv'
-    time.sleep(1)
-    final_df.to_csv(file_path, index=False)
-    print("Saved to csv: " + file_path)
-
-    send_email_notification("jhlevy01@gmail.com",
-                            'Chart Scraping: SUCCESS',
-                            'Your program is complete with no issues. Please check the results.',
-                            file_path)
-
-    send_email_notification("aidanalrawi@icloud.com",
-                            'Chart Scraping: SUCCESS',
-                            'Your program is complete with no issues. Please check the results.',
-                            file_path)
+    # send_email_notification("jhlevy01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
+    send_email_notification("aidanalrawi@icloud.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
 
 
 if __name__ == "__main__":
-    global final_df, time_remaining_dict
-    time_remaining_dict = {}
-    # Make a df with a column for the song
-    final_df = pd.DataFrame(columns=["Song", "Link"])
-    pd.set_option('display.max_columns', 500)
+    # Set the number of threads
+    number_of_threads = 1
 
-    # country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-    #                 "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT",
-    #                 "LU", "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK",
-    #                 "KR", "ZA", "ES", "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
-    #
-    # dance_alternative_countries_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
-    country_list = ["US", "GB"]
-    dance_alternative_countries_list = []
+    # Set the detach option
+    detach = True
 
-    platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
-    filters_list = ["no_labels"]
+    # Set the test mode option
+    test_mode = False
 
-    run_with_threading(country_list,
-                       dance_alternative_countries_list,
-                       platform_list,
-                       filters_list,
-                       detach=False,
-                       number_of_threads=3,
-                       test_mode=False)
+    watchlist = [
+        "https://app.soundcharts.com/app/song/b6ac0f7e-112b-11ea-8a46-a81e84f2a475/trends",
+        "https://app.soundcharts.com/app/song/f6309a80-ad16-46e5-8872-4adb83659640/trends",
+    ]
+    scrape_watchlist(watchlist=watchlist)
