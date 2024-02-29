@@ -877,11 +877,12 @@ def scrape_watchlist(watchlist: []):
     # Reorder the columns
     df = df[['Link', 'Artist', 'Song', 'Total_Streams', 'Streams', 'Yesterday', '3_day_avg', '3_day_%_change',
              '5_day_%_change', '10_day_%_change']]
-    
+
     df.to_csv("watchlist.csv", index=False)
 
     # send_email_notification("jhlevy01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
     send_email_notification("aidanalrawi@icloud.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
+    send_email_notification("jhlvey01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
 
 
 if __name__ == "__main__":

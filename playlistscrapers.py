@@ -727,8 +727,6 @@ def apply_final_filters_and_formatting(df):
     # Concat the streams columns with the original dataframe
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
-    print(df)
-
     # df = df[df["3_day_avg"] > 2000]
 
     # Reverse the streams column
