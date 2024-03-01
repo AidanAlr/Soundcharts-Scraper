@@ -791,6 +791,7 @@ def run_with_threading(playlist_list,
 def read_playlist_input_csv():
     playlist_df = pd.read_csv("playlist_input.csv")
     playlist_list = playlist_df['Link'].tolist()
+    print("Playlist list read from csv")
     return playlist_list
 
 

@@ -885,6 +885,7 @@ def scrape_watchlist(watchlist: []):
 
 def read_watchlist_input_csv():
     watchlist_df = pd.read_csv("watchlist_input.csv")
+    print("Read watchlist input csv")
     return watchlist_df['Link'].tolist()
 
 
