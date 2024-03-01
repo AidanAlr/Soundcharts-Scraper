@@ -943,9 +943,7 @@ if __name__ == "__main__":
                     "KR", "ZA", "ES", "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
 
     dance_alternative_countries_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
-    # country_list = ["US", "GB"]
-    # dance_alternative_countries_list = []
-
+    
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
 

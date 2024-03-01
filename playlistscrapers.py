@@ -1,5 +1,6 @@
 import math
 import statistics
+import sys
 import time
 from threading import Thread
 
@@ -722,12 +723,13 @@ def run_thread(playlist_list, thread_number,
 
 def apply_final_filters_and_formatting(df):
     if df.empty:
-        print("No songs that match filters.")
-        return None
+        print("No songs that match filters. Cant make csv. Exiting.")
+        sys.exit(0)
+        
     # Concat the streams columns with the original dataframe
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
-    # df = df[df["3_day_avg"] > 2000]
+    df = df[df["3_day_avg"] > 2000]
 
     # Reverse the streams column
     df = reverse_streams_column(df)
