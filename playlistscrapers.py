@@ -1,7 +1,13 @@
 import math
+import os
+import smtplib
 import statistics
 import sys
 import time
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from threading import Thread
 
 import pandas as pd
@@ -13,13 +19,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
-import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def append_row(df, row):
@@ -645,8 +644,8 @@ def print_progress(time_remaining_dict, task_time_list, index, row, thread_numbe
 
 
 def collect_data_from_playlist(driver, link, results_dict):
-    filter_string = "?filters=eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D"
-    link = link + filter_string
+    # filter_string = "?filters=eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D"
+    # link = link + filter_string
     driver.get(link)
     time.sleep(6)
     df = parse_webpage(driver, link)
@@ -725,7 +724,7 @@ def apply_final_filters_and_formatting(df):
     if df.empty:
         print("No songs that match filters. Cant make csv. Exiting.")
         sys.exit(0)
-        
+
     # Concat the streams columns with the original dataframe
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
@@ -789,6 +788,12 @@ def run_with_threading(playlist_list,
                             file_path)
 
 
+def read_playlist_input_csv():
+    playlist_df = pd.read_csv("playlist_input.csv")
+    playlist_list = playlist_df['Link'].tolist()
+    return playlist_list
+
+
 if __name__ == "__main__":
     global final_df, time_remaining_dict
     time_remaining_dict = {}
@@ -796,8 +801,8 @@ if __name__ == "__main__":
     final_df = pd.DataFrame(columns=["Song", "Link"])
     pd.set_option('display.max_columns', 500)
 
-    playlist_list = ['https://app.soundcharts.com/app/playlist/28ea50ad-87e1-4ebe-aa9a-d1981296e6ce/tracks',
-                     'https://app.soundcharts.com/app/playlist/b4bbf3af-de8e-418d-a8f7-148ac3620cc5/tracks']
+    playlist_list = read_playlist_input_csv()
+
     run_with_threading(playlist_list,
                        number_of_threads=3,
                        test_mode=False)

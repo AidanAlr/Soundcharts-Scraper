@@ -1,6 +1,12 @@
 import math
+import os
+import smtplib
 import statistics
 import time
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from threading import Thread
 
 import pandas as pd
@@ -12,13 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
-import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def append_row(df, row):
@@ -930,6 +929,20 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
                             file_path)
 
 
+def read_main_input_csv():
+    main_df = pd.read_csv("main_input.csv")
+    country_list = main_df["Country"].tolist()
+    dance_alternative_countries_list = main_df["Dance_Alternative_Countries"].tolist()
+    country_list = [country for country in country_list if str(country) != 'nan']
+    dance_alternative_countries_list = [country for country in dance_alternative_countries_list if str(country) != 'nan']
+    print("Read main input csv")
+    print("Country_list: ")
+    print(country_list)
+    print("Dance_Alternative_Countries: ")
+    print(dance_alternative_countries_list)
+    return country_list, dance_alternative_countries_list
+
+
 if __name__ == "__main__":
     global final_df, time_remaining_dict
     time_remaining_dict = {}
@@ -937,13 +950,8 @@ if __name__ == "__main__":
     final_df = pd.DataFrame(columns=["Song", "Link"])
     pd.set_option('display.max_columns', 500)
 
-    country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT",
-                    "LU", "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK",
-                    "KR", "ZA", "ES", "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    country_list, dance_alternative_countries_list = read_main_input_csv()
 
-    dance_alternative_countries_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
-    
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
 

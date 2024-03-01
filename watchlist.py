@@ -1,7 +1,12 @@
 import math
+import os
+import smtplib
 import statistics
 import time
-from threading import Thread
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import pandas as pd
 from selenium import webdriver
@@ -12,13 +17,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
-import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def append_row(df, row):
@@ -885,6 +883,11 @@ def scrape_watchlist(watchlist: []):
     send_email_notification("jhlvey01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
 
 
+def read_watchlist_input_csv():
+    watchlist_df = pd.read_csv("watchlist_input.csv")
+    return watchlist_df['Link'].tolist()
+
+
 if __name__ == "__main__":
     # Set the number of threads
     number_of_threads = 1
@@ -895,8 +898,5 @@ if __name__ == "__main__":
     # Set the test mode option
     test_mode = False
 
-    watchlist = [
-        "https://app.soundcharts.com/app/song/b6ac0f7e-112b-11ea-8a46-a81e84f2a475/trends",
-        "https://app.soundcharts.com/app/song/f6309a80-ad16-46e5-8872-4adb83659640/trends",
-    ]
+    watchlist = read_watchlist_input_csv()
     scrape_watchlist(watchlist=watchlist)
