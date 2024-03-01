@@ -875,12 +875,14 @@ def scrape_watchlist(watchlist: []):
     # Reorder the columns
     df = df[['Link', 'Artist', 'Song', 'Total_Streams', 'Streams', 'Yesterday', '3_day_avg', '3_day_%_change',
              '5_day_%_change', '10_day_%_change']]
+    filepath = "watchlist " + time.strftime("%Y-%m-%d %H-%M") + ".csv"
+    df.to_csv(filepath, index=False)
+    print("Saved to", filepath)
+    driver.quit()
 
-    df.to_csv("watchlist.csv", index=False)
-
-    # send_email_notification("jhlevy01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
-    send_email_notification("aidanalrawi@icloud.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
-    send_email_notification("jhlvey01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
+    # # send_email_notification("jhlevy01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
+    # send_email_notification("aidanalrawi@icloud.com", "Watchlist Scraped", "Watchlist scraped successfully", filepath)
+    # send_email_notification("jhlvey01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", filepath)
 
 
 def read_watchlist_input_csv():
@@ -892,12 +894,5 @@ def read_watchlist_input_csv():
 if __name__ == "__main__":
     # Set the number of threads
     number_of_threads = 1
-
-    # Set the detach option
-    detach = True
-
-    # Set the test mode option
-    test_mode = False
-
     watchlist = read_watchlist_input_csv()
     scrape_watchlist(watchlist=watchlist)
