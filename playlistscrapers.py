@@ -559,8 +559,7 @@ def get_extra_song_chart_data(driver, extra_country_list, results_dict):
     }
 
     for country in extra_country_list:
-        alternative_link = (
-            f"https://app.soundcharts.com/app/market/charts?chart=alternative-{alternative_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music")
+        alternative_link = f"https://app.soundcharts.com/app/market/charts?chart=alternative-{alternative_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music"
         dance_link = f"https://app.soundcharts.com/app/market/charts?chart=dance-{dance_chart_dict[country]}&chart_type=song&country={country}&platform=apple-music"
         try:
             df = parse_webpage(driver, alternative_link)
@@ -602,8 +601,7 @@ def collect_data_from_playlist(driver, link, results_dict):
             attempts += 1
 
 
-def run_thread(playlist_list, thread_number,
-               test_mode=False):
+def run_thread(playlist_list, thread_number):
     global final_df, time_remaining_dict
 
     # Start the webdriver and login
@@ -686,8 +684,7 @@ def apply_final_filters_and_formatting(df):
     return df[desired_order]
 
 
-def run_with_threading(playlist_list,
-                       number_of_threads, test_mode):
+def run_with_threading(playlist_list, number_of_threads):
     # List to store the threads
     threads = []
 
@@ -704,7 +701,7 @@ def run_with_threading(playlist_list,
         end = start + tasks_per_thread + (1 if i < extra_tasks else 0)
 
         t = Thread(target=run_thread,
-                   args=(playlist_list[start:end], i, test_mode))
+                   args=(playlist_list[start:end], i))
         t.start()
         threads.append(t)
 
@@ -738,13 +735,6 @@ def read_playlist_input_csv():
     return playlist_list
 
 
-def read_playlist_input_csv():
-    playlist_df = pd.read_csv("playlist_input.csv")
-    playlist_list = playlist_df['Link'].tolist()
-    print("Playlist list read from csv")
-    return playlist_list
-
-
 if __name__ == "__main__":
     global final_df, time_remaining_dict
     time_remaining_dict = {}
@@ -755,5 +745,4 @@ if __name__ == "__main__":
     playlist_list = read_playlist_input_csv()
 
     run_with_threading(playlist_list,
-                       number_of_threads=4,
-                       test_mode=False)
+                       number_of_threads=4)
