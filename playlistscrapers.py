@@ -738,6 +738,13 @@ def read_playlist_input_csv():
     return playlist_list
 
 
+def read_playlist_input_csv():
+    playlist_df = pd.read_csv("playlist_input.csv")
+    playlist_list = playlist_df['Link'].tolist()
+    print("Playlist list read from csv")
+    return playlist_list
+
+
 if __name__ == "__main__":
     global final_df, time_remaining_dict
     time_remaining_dict = {}
