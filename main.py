@@ -436,7 +436,6 @@ def locate_and_move_to_spotify_chart(driver):
 
 def get_streams(link, driver) -> (str, str, str):
     attempts = 0
-    link = change_to_spotify(link)
     while attempts < 4:
         streams = ""
         total_streams = []
