@@ -861,14 +861,18 @@ def scrape_watchlist(watchlist: []):
                       columns=["Link", "Total_Streams", "Streams"])
 
     for link in watchlist:
-        print("Scraping link", link)
-        streams, total_streams, *_ = get_streams(link, driver)
-        song_and_artist = driver.find_element(By.CSS_SELECTOR, "div.sc-hZhUor.cPnknH").text.split("\n")
-        song, artist = song_and_artist[0].lstrip("by"), song_and_artist[1]
+        try:
+            print("Scraping link", link)
+            streams, total_streams, *_ = get_streams(link, driver)
+            song_and_artist = driver.find_element(By.CSS_SELECTOR, "div.sc-hZhUor.cPnknH").text.split("\n")
+            song, artist = song_and_artist[0].lstrip("by"), song_and_artist[1]
 
-        new_row = pd.DataFrame([[artist, song, link, total_streams, streams]],
-                               columns=["Artist", "Song", "Link", "Total_Streams", "Streams"])
-        df = pd.concat([df, new_row], axis=0)
+            new_row = pd.DataFrame([[artist, song, link, total_streams, streams]],
+                                   columns=["Artist", "Song", "Link", "Total_Streams", "Streams"])
+            df = pd.concat([df, new_row], axis=0)
+        except Exception as e:
+            print(e)
+            print("Could not scrape link", link)
 
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
     df = reverse_streams_column(df)

@@ -76,12 +76,6 @@ def convert_seconds_to_time_str(seconds):
     return f"{minutes}m:{seconds}s"
 
 
-def get_variable_name(var):
-    for name, value in globals().items():
-        if value is var:
-            return name
-
-
 def extract_after_last_slash(url):
     parts = url.split('/')
     return parts[-1]
@@ -119,13 +113,6 @@ def scroll(driver, scroll_amount):
             time.sleep(0.5)
     except Exception:
         print("Could not scroll")
-
-
-def make_dataframe(*args):
-    df = pd.DataFrame()
-    for arg in args:
-        df = pd.concat([df, pd.DataFrame(arg)], axis=1)
-    return df
 
 
 def extract_names(names):
@@ -363,15 +350,6 @@ def login_to_new_driver(detach=False) -> webdriver.Chrome():
             time.sleep(5)
 
 
-def output_to_excel_from_dict(excel_dict):
-    time_string = time.strftime("%Y-%m-%d %H-%M-%S")
-    filename = f"soundcharts_{time_string}.xlsx"
-    with pd.ExcelWriter(filename) as writer:
-        for sheet_name, df in excel_dict.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    print(f"Saved to {filename}")
-
-
 def remove_songs_with_labels_from_df(df):
     labels_to_remove = ["sony", 'umg', 'warner', 'independent', 'universal', 'warner music', 'sony music',
                         'universal music', "yzy", "Island",
@@ -399,7 +377,7 @@ def locate_and_move_to_spotify_chart(driver):
     return tooltip_size
 
 
-def get_streams(link, driver):
+def get_streams(link, driver) -> (str, str, str):
     attempts = 0
     link = change_to_spotify(link)
     while attempts < 4:
@@ -433,33 +411,26 @@ def get_streams(link, driver):
             if not total_streams:
                 total_streams.append("0")
 
-            return streams, total_streams[-1]
+            return streams, total_streams[-1], get_artist_page_link(driver)
 
         except Exception as e:
             print("Could not get streams for:" + link)
-            print(e)
             if attempts == 3:
-                return "Error", "Error"
+                return "Error", "Error", "Error"
 
 
-def parse_artist_if_multiple(artist):
-    if "•" in artist:
-        artist = artist.split("•")[0]
-    artist = artist.strip().replace(" ", "-").lower()
-    return artist
+def get_artist_page_link(driver):
+    artist_page_link = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "a.sc-EHOje.iAfflV"))).get_attribute("href")
+    return artist_page_link
 
 
-def get_spotify_followers_and_total_fans(artist, driver):
-    artist = parse_artist_if_multiple(artist)
-    link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
+def get_spotify_followers_and_total_fans(link, driver):
     fans = ""
     spotify = ""
     try:
         driver.get(link)
         time.sleep(5)
-        # followers = WebDriverWait(driver, 5).until(
-        #     lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
-        followers = WebDriverWait(driver, 5).until(
+        followers = WebDriverWait(driver, 10).until(
             lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-dBaXSw.bHhScY.social-evolution-details.clickable"))
         followers = [div.text for div in followers]
         spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
@@ -473,7 +444,7 @@ def get_spotify_followers_and_total_fans(artist, driver):
             fans = total_fans
 
     except Exception:
-        print("Could not get total fans or followers for:" + artist)
+        print("Could not get total fans or followers for:" + link)
 
     return spotify, fans
 
@@ -609,47 +580,26 @@ def get_extra_song_chart_data(driver, extra_country_list, results_dict):
             print(e)
 
 
-def collect_all_genres_charts(driver, country_list, extra_country_list, platform_list, filters_list,
-                              results_dict, test_mode) -> None:
-    tasks = len(country_list) * len(platform_list) * len(filters_list) + len(extra_country_list) * 2
-    count = 0
-    for country in country_list:
-        for platform in platform_list:
-            for filters in filters_list:
-                try:
-                    # Create the link
-                    page = Link("song", country, platform, filters)
-                    # Parse the webpage
-                    df = parse_webpage(driver, page.link_string)
-                    if test_mode:
-                        df = df.head(5)
-                    # Add the country and platform to the dataframe
-                    df["Country"] = country
-                    df["Platform"] = platform
-                    # Add the dataframe to the dictionary
-                    results_dict[f"{page.country}_{page.platform}"] = df
-                    count += 1
-                    print(f"Parsed {count}/{tasks} pages")
-                except Exception as e:
-                    print(e)
-
-
 def print_progress(time_remaining_dict, task_time_list, index, row, thread_number, df):
     # Calculate the time remaining
     task_time_avg = statistics.mean(task_time_list[-10:])
     time_remaining_dict[thread_number] = task_time_avg * (len(df) - int(index))
     time_remaining_string = convert_seconds_to_time_str(statistics.mean(time_remaining_dict.values()))
     print(
-        f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
+        f"Thread {thread_number} getting stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
 
 
 def collect_data_from_playlist(driver, link, results_dict):
-    # filter_string = "?filters=eyJmc2ciOiJBTExfR0VOUkVTIiwiZmx0IjoiU2VsZiByZWxlYXNlZHxVbmtub3duIn0%3D"
-    # link = link + filter_string
-    driver.get(link)
-    time.sleep(6)
-    df = parse_webpage(driver, link)
-    results_dict[f"{link}"] = df
+    attempts = 0
+    while attempts < 2:
+        try:
+            df = parse_webpage(driver, link)
+            results_dict[f"{link}"] = df
+            break
+        except Exception as e:
+            print(e)
+            print(f"Could not get data for {link} retrying...")
+            attempts += 1
 
 
 def run_thread(playlist_list, thread_number,
@@ -667,24 +617,31 @@ def run_thread(playlist_list, thread_number,
     # Concatenate all the dataframes in the results dictionary into a single dataframe
     df = pd.concat(results_dict.values(), axis=0)
 
-    df = remove_duplicates_based_on_song_and_link(df)
-
     # Change the link to spotify
     df['Link'] = df['Link'].apply(change_to_spotify)
+    df = remove_duplicates_based_on_song_and_link(df)
 
-    # Reset the index
-    df.reset_index(drop=True, inplace=True)
+    # Randomly shuffle the row order
+    df = df.sample(frac=1).reset_index(drop=True)
 
-    task_time_list = []
+    task_time_list = [5]
+
     # Loop through each row in the df and get the streams/total streams/followers/fans
     for index, row in df.iterrows():
-        # Only allow rows with song not in the final_df
         if row["Song"] not in final_df["Song"].values and row["Link"] not in final_df["Link"].values:
             try:
                 start_time = time.time()
 
+                # Get the daily streams and total streams
+                daily_streams, total_streams, artist_page_link, *_ = get_streams(row["Link"], driver)
+                # Add entire row to the dataframe
+                row['Streams'] = daily_streams
+                row['Total_Streams'] = total_streams
+                # Cast the total streams to numeric
+                row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
+
                 # Get the spotify followers and total fans
-                spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Artists"], driver)
+                spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist_page_link, driver)
                 row['Followers'] = spotify_followers
                 row['Total_Fans'] = fans
 
@@ -692,30 +649,15 @@ def run_thread(playlist_list, thread_number,
                 row['Followers'] = pd.to_numeric(row['Followers'], errors='coerce')
                 row['Total_Fans'] = pd.to_numeric(row['Total_Fans'], errors='coerce')
 
-                if row['Total_Fans'] < 100_000:
-
-                    # Get the daily streams and total streams
-                    daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
-                    # Add entire row to the dataframe
-                    row['Streams'] = daily_streams
-                    row['Total_Streams'] = total_streams
-
-                    # Cast the total streams to numeric
-                    row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
-
-                    # Only add rows with total fans less than 100,000 and total streams less than 5,000,000
-                    if row['Total_Fans'] < 100_000 and row['Total_Streams'] < 5_000_000:
-                        final_df = append_row(final_df, row)
+                final_df = append_row(final_df, row)
 
                 end_time = time.time()
 
                 task_time_list.append(end_time - start_time)
-
                 print_progress(time_remaining_dict, task_time_list, index, row, thread_number, df)
 
             except Exception as e:
-                print(e)
-                print(f"Could not get stats for {row['Song']}")
+                print(f"Thread {thread_number} could not get stats for {row['Song']}")
 
     print(f"Finished getting stats for all songs on thread {thread_number}")
 
@@ -728,8 +670,11 @@ def apply_final_filters_and_formatting(df):
     # Concat the streams columns with the original dataframe
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
+    df = df[df['Total_Fans'] < 100_000]
+    df = df[df['Total_Streams'] < 5_000_000]
     df = df[df["3_day_avg"] > 2000]
 
+    df = remove_duplicates_based_on_song_and_link(df)
     # Reverse the streams column
     df = reverse_streams_column(df)
 
@@ -776,16 +721,21 @@ def run_with_threading(playlist_list,
     time.sleep(1)
     final_df.to_csv(file_path, index=False)
     print("Saved to csv: " + file_path)
+    #
+    # send_email_notification("jhlevy01@gmail.com", 'Playlist Scraping: SUCCESS', 'Your program is complete with no issues. Please check the results.',
+    #                         file_path)
+    #
+    # send_email_notification("aidanalrawi@icloud.com",
+    #                         'Playlist Scraping: SUCCESS',
+    #                         'Your program is complete with no issues. Please check the results.',
+    #                         file_path)
 
-    send_email_notification("jhlevy01@gmail.com",
-                            'Playlist Scraping: SUCCESS',
-                            'Your program is complete with no issues. Please check the results.',
-                            file_path)
 
-    send_email_notification("aidanalrawi@icloud.com",
-                            'Playlist Scraping: SUCCESS',
-                            'Your program is complete with no issues. Please check the results.',
-                            file_path)
+def read_playlist_input_csv():
+    playlist_df = pd.read_csv("playlist_input.csv")
+    playlist_list = playlist_df['Link'].tolist()
+    print("Playlist list read from csv")
+    return playlist_list
 
 
 def read_playlist_input_csv():
@@ -805,5 +755,5 @@ if __name__ == "__main__":
     playlist_list = read_playlist_input_csv()
 
     run_with_threading(playlist_list,
-                       number_of_threads=3,
+                       number_of_threads=4,
                        test_mode=False)
