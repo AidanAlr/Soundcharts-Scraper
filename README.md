@@ -1,0 +1,2 @@
+# Soundcharts-Scraper
+This is a webscraper that I built for a client that scrapes the soundcharts platform for over 500 charts. This program takes advantage of Python multithreading and is able to efficiently scrape, filter and format the required data using multiple chrome browser windows. The modules that I used in this project include Selenium and Pandas, additionally I added an email notification that is sent once the program has completed using the smtp library.

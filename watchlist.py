@@ -1,7 +1,12 @@
 import math
+import os
+import smtplib
 import statistics
 import time
-from threading import Thread
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import pandas as pd
 from selenium import webdriver
@@ -12,13 +17,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
-import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def append_row(df, row):
@@ -863,40 +861,42 @@ def scrape_watchlist(watchlist: []):
                       columns=["Link", "Total_Streams", "Streams"])
 
     for link in watchlist:
-        print("Scraping link", link)
-        streams, total_streams, *_ = get_streams(link, driver)
-        song_and_artist = driver.find_element(By.CSS_SELECTOR, "div.sc-hZhUor.cPnknH").text.split("\n")
-        song, artist = song_and_artist[0].lstrip("by"), song_and_artist[1]
+        try:
+            print("Scraping link", link)
+            streams, total_streams, *_ = get_streams(link, driver)
+            song_and_artist = driver.find_element(By.CSS_SELECTOR, "div.sc-hZhUor.cPnknH").text.split("\n")
+            song, artist = song_and_artist[0].lstrip("by"), song_and_artist[1]
 
-        new_row = pd.DataFrame([[artist, song, link, total_streams, streams]],
-                               columns=["Artist", "Song", "Link", "Total_Streams", "Streams"])
-        df = pd.concat([df, new_row], axis=0)
+            new_row = pd.DataFrame([[artist, song, link, total_streams, streams]],
+                                   columns=["Artist", "Song", "Link", "Total_Streams", "Streams"])
+            df = pd.concat([df, new_row], axis=0)
+        except Exception as e:
+            print(e)
+            print("Could not scrape link", link)
 
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
     df = reverse_streams_column(df)
     # Reorder the columns
     df = df[['Link', 'Artist', 'Song', 'Total_Streams', 'Streams', 'Yesterday', '3_day_avg', '3_day_%_change',
              '5_day_%_change', '10_day_%_change']]
+    filepath = "watchlist " + time.strftime("%Y-%m-%d %H-%M") + ".csv"
+    df.to_csv(filepath, index=False)
+    print("Saved to", filepath)
+    driver.quit()
 
-    df.to_csv("watchlist.csv", index=False)
+    # # send_email_notification("jhlevy01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
+    # send_email_notification("aidanalrawi@icloud.com", "Watchlist Scraped", "Watchlist scraped successfully", filepath)
+    # send_email_notification("jhlvey01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", filepath)
 
-    # send_email_notification("jhlevy01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
-    send_email_notification("aidanalrawi@icloud.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
-    send_email_notification("jhlvey01@gmail.com", "Watchlist Scraped", "Watchlist scraped successfully", "watchlist.csv")
+
+def read_watchlist_input_csv():
+    watchlist_df = pd.read_csv("watchlist_input.csv")
+    print("Read watchlist input csv")
+    return watchlist_df['Link'].tolist()
 
 
 if __name__ == "__main__":
     # Set the number of threads
     number_of_threads = 1
-
-    # Set the detach option
-    detach = True
-
-    # Set the test mode option
-    test_mode = False
-
-    watchlist = [
-        "https://app.soundcharts.com/app/song/b6ac0f7e-112b-11ea-8a46-a81e84f2a475/trends",
-        "https://app.soundcharts.com/app/song/f6309a80-ad16-46e5-8872-4adb83659640/trends",
-    ]
+    watchlist = read_watchlist_input_csv()
     scrape_watchlist(watchlist=watchlist)

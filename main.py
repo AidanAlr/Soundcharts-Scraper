@@ -1,6 +1,12 @@
 import math
+import os
+import smtplib
 import statistics
 import time
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from threading import Thread
 
 import pandas as pd
@@ -12,13 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-
-import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 
 def append_row(df, row):
@@ -435,7 +434,7 @@ def locate_and_move_to_spotify_chart(driver):
     return tooltip_size
 
 
-def get_streams(link, driver):
+def get_streams(link, driver) -> (str, str, str):
     attempts = 0
     link = change_to_spotify(link)
     while attempts < 4:
@@ -469,33 +468,21 @@ def get_streams(link, driver):
             if not total_streams:
                 total_streams.append("0")
 
-            return streams, total_streams[-1]
+            return streams, total_streams[-1], get_artist_page_link(driver)
 
         except Exception as e:
             print("Could not get streams for:" + link)
-            print(e)
             if attempts == 3:
-                return "Error", "Error"
+                return "Error", "Error", "Error"
 
 
-def parse_artist_if_multiple(artist):
-    if "•" in artist:
-        artist = artist.split("•")[0]
-    artist = artist.strip().replace(" ", "-").lower()
-    return artist
-
-
-def get_spotify_followers_and_total_fans(artist, driver):
-    artist = parse_artist_if_multiple(artist)
-    link = f"https://app.soundcharts.com/app/artist/{artist}/overview"
+def get_spotify_followers_and_total_fans(link, driver):
     fans = ""
     spotify = ""
     try:
         driver.get(link)
         time.sleep(5)
-        # followers = WebDriverWait(driver, 5).until(
-        #     lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-gleUXh.jjAkJt.social-evolution-details.clickable"))
-        followers = WebDriverWait(driver, 5).until(
+        followers = WebDriverWait(driver, 10).until(
             lambda drvr: drvr.find_elements(By.CSS_SELECTOR, "div.sc-dBaXSw.bHhScY.social-evolution-details.clickable"))
         followers = [div.text for div in followers]
         spotify_followers = [follower for follower in followers if "spotify" in follower.lower()]
@@ -509,7 +496,7 @@ def get_spotify_followers_and_total_fans(artist, driver):
             fans = total_fans
 
     except Exception:
-        print("Could not get total fans or followers for:" + artist)
+        print("Could not get total fans or followers for:" + link)
 
     return spotify, fans
 
@@ -679,6 +666,11 @@ def print_progress(time_remaining_dict, task_time_list, index, row, thread_numbe
         f"Thread {thread_number} got stats for {row['Song']} | {index}/{len(df)} | {time_remaining_string} remaining")
 
 
+def get_artist_page_link(driver):
+    artist_page_link = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "a.sc-EHOje.iAfflV"))).get_attribute("href")
+    return artist_page_link
+
+
 def run_thread(country_list, extra_country_list, platform_list, filters_list, detach, thread_number,
                test_mode=False):
     """
@@ -717,7 +709,7 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
     df['Link'] = df['Link'].apply(change_to_spotify)
 
     # Reset the index
-    df.reset_index(drop=True, inplace=True)
+    df = df.sample(frac=1).reset_index(drop=True)
 
     task_time_list = []
     # Loop through each row in the df and get the streams/total streams/followers/fans
@@ -727,8 +719,16 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
             try:
                 start_time = time.time()
 
+                # Get the daily streams and total streams
+                daily_streams, total_streams, artist_page_link, *_ = get_streams(row["Link"], driver)
+                # Add entire row to the dataframe
+                row['Streams'] = daily_streams
+                row['Total_Streams'] = total_streams
+                # Cast the total streams to numeric
+                row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
+
                 # Get the spotify followers and total fans
-                spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(row["Artists"], driver)
+                spotify_followers, fans, *_ = get_spotify_followers_and_total_fans(artist_page_link, driver)
                 row['Followers'] = spotify_followers
                 row['Total_Fans'] = fans
 
@@ -736,28 +736,15 @@ def run_thread(country_list, extra_country_list, platform_list, filters_list, de
                 row['Followers'] = pd.to_numeric(row['Followers'], errors='coerce')
                 row['Total_Fans'] = pd.to_numeric(row['Total_Fans'], errors='coerce')
 
-                if row['Total_Fans'] < 100_000:
-
-                    # Get the daily streams and total streams
-                    daily_streams, total_streams, *_ = get_streams(row["Link"], driver)
-                    # Add entire row to the dataframe
-                    row['Streams'] = daily_streams
-                    row['Total_Streams'] = total_streams
-
-                    # Cast the total streams to numeric
-                    row['Total_Streams'] = pd.to_numeric(row['Total_Streams'], errors='coerce')
-
-                    # Only add rows with total fans less than 100,000 and total streams less than 5,000,000
-                    if row['Total_Fans'] < 100_000 and row['Total_Streams'] < 5_000_000:
-                        final_df = append_row(final_df, row)
+                final_df = append_row(final_df, row)
 
                 end_time = time.time()
 
                 task_time_list.append(end_time - start_time)
+
                 print_progress(time_remaining_dict, task_time_list, index, row, thread_number, df)
 
             except Exception as e:
-                print(e)
                 print(f"Could not get stats for {row['Song']}")
 
     print(f"Finished getting stats for all songs on thread {thread_number}")
@@ -767,7 +754,10 @@ def apply_final_filters_and_formatting(df):
     # Concat the streams columns with the original dataframe
     df = pd.concat([df, parse_streams_into_columns(df)], axis=1)
 
+    df = df[df['Total_Fans'] < 100_000]
+    df = df[df['Total_Streams'] < 5_000_000]
     df = df[df["3_day_avg"] > 2000]
+    df = remove_duplicates_based_on_song_and_link(df)
 
     # Reverse the streams column
     df = reverse_streams_column(df)
@@ -930,6 +920,20 @@ def run_with_threading(country_list, extra_country_list, platform_list, filters_
                             file_path)
 
 
+def read_main_input_csv():
+    main_df = pd.read_csv("main_input.csv")
+    country_list = main_df["Country"].tolist()
+    dance_alternative_countries_list = main_df["Dance_Alternative_Countries"].tolist()
+    country_list = [country for country in country_list if str(country) != 'nan']
+    dance_alternative_countries_list = [country for country in dance_alternative_countries_list if str(country) != 'nan']
+    print("Read main input csv")
+    print("Country_list: ")
+    print(country_list)
+    print("Dance_Alternative_Countries: ")
+    print(dance_alternative_countries_list)
+    return country_list, dance_alternative_countries_list
+
+
 if __name__ == "__main__":
     global final_df, time_remaining_dict
     time_remaining_dict = {}
@@ -937,13 +941,8 @@ if __name__ == "__main__":
     final_df = pd.DataFrame(columns=["Song", "Link"])
     pd.set_option('display.max_columns', 500)
 
-    country_list = ["AR", "AU", "AT", "BY", "BE", "BO", "BR", "BG", "CA", "CL", "CO", "CR", "CY", "CZ", "DK", "DO", "EC", "EG", "SV",
-                    "EE", "FI", "FR", "DE", "GR", "GT", "HN", "HK", "HU", "IS", "IN", "ID", "IE", "IL", "IT", "JP", "LV", "KZ", "LT",
-                    "LU", "MY", "MX", "MA", "NL", "NZ", "NI", "NO", "NG", "PK", "PA", "PY", "PE", "PH", "PL", "PT", "RO", "SG", "SK",
-                    "KR", "ZA", "ES", "SE", "CH", "TW", "TH", "TR", "UA", "AE", "GB", "US", "UY", "VN", "VE"]
+    country_list, dance_alternative_countries_list = read_main_input_csv()
 
-    dance_alternative_countries_list = ["US", "GB", "CA", "EE", "UA", "LT", "LV", "AT", "KZ", "BG", "HU", "CZ"]
-    
     platform_list = ["spotify", "apple-music", "shazam", "soundcloud"]
     filters_list = ["no_labels"]
 
@@ -952,5 +951,5 @@ if __name__ == "__main__":
                        platform_list,
                        filters_list,
                        detach=False,
-                       number_of_threads=3,
+                       number_of_threads=4,
                        test_mode=False)
