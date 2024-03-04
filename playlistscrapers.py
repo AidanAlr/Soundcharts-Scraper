@@ -419,7 +419,8 @@ def get_streams(link, driver) -> (str, str, str):
 
 
 def get_artist_page_link(driver):
-    artist_page_link = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "a.sc-EHOje.iAfflV"))).get_attribute("href")
+    artist_page_link = WebDriverWait(driver, 10).until(
+        EC.visibility_of_element_located((By.CSS_SELECTOR, "a.sc-EHOje.iAfflV"))).get_attribute("href")
     return artist_page_link
 
 
@@ -717,14 +718,15 @@ def run_with_threading(playlist_list, number_of_threads):
     time.sleep(1)
     final_df.to_csv(file_path, index=False)
     print("Saved to csv: " + file_path)
-    #
-    # send_email_notification("jhlevy01@gmail.com", 'Playlist Scraping: SUCCESS', 'Your program is complete with no issues. Please check the results.',
-    #                         file_path)
-    #
-    # send_email_notification("aidanalrawi@icloud.com",
-    #                         'Playlist Scraping: SUCCESS',
-    #                         'Your program is complete with no issues. Please check the results.',
-    #                         file_path)
+
+    send_email_notification("jhlevy01@gmail.com", 'Playlist Scraping: SUCCESS',
+                            'Your program is complete with no issues. Please check the results.',
+                            file_path)
+
+    send_email_notification("aidanalrawi@icloud.com",
+                            'Playlist Scraping: SUCCESS',
+                            'Your program is complete with no issues. Please check the results.',
+                            file_path)
 
 
 def read_playlist_input_csv():
