@@ -373,8 +373,9 @@ def login_to_new_driver(detach=False) -> webdriver.Chrome():
             password_input = driver.find_element(By.NAME, "password")
 
             # Enter username and password
-            username_input.send_keys("jhlevy01@gmail.com")
-            password_input.send_keys("pogg4$33a!")
+            ###ADD INPUT HERE
+            username_input.send_keys("")
+            password_input.send_keys("")
 
             # Find and click the login button
             login_button = driver.find_element(By.XPATH, "//button[@type='submit']")
